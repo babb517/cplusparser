@@ -20,6 +20,8 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#pragma once
+
 #include <list>
 #include <string>
 #include <exception>
@@ -44,16 +46,17 @@ namespace details {
 
 
 /**
- * @brief Copies elements from one array to another in reverse.
- * @param src The base address of the array to copy from.
- * @param dest The base address of the array to copy to (pointing the destination of the last element to copied from src).
+ * @brief Copies the contents of one array to the other in reverse order.
+ * @param[out] dest The destination array.
+ * @param src The source array.
+ * @param n The number of character to copy.
  */
-template<typename T>
-void reverse_copy(T const* src, T* dest, size_t n) {
-	size_t max_i = n-1;
-	for (size_t i = 0; i < n; i++) {
-		dest[max_i-i] = src[i];
-	}
+void reverse_copy(char *dest, char const*src, std::streamsize n) {
+		size_t max_i = n-1;
+
+		for (size_t i = 0; i < n; i++) {
+			dest[max_i - i] = src[i];
+		}
 }
 
 
@@ -62,6 +65,7 @@ void reverse_copy(T const* src, T* dest, size_t n) {
 /*****************************************************************************************/
 
 /// Free the context
+template <typename tag_t, typename... TagArgs>
 CompoundFileSource::FileContext::~FileContext() {
 	if (buf) delete buf;
 	if (source) {
@@ -75,30 +79,48 @@ CompoundFileSource::FileContext::~FileContext() {
 /******************************************************************************************/
 
 // Constructor
-CompoundFileSource::CompoundFileSource(void* nullptr_hack) {
+template <typename tag_t, typename... TagArgs>
+CompoundFileSource::CompoundFileSource(bool autoAdvance) {
+	mAutoAdvance = autoAdvance;
 	state(CLOSED);
 }
 
+template <typename tag_t, typename... TagArgs>
+CompoundFileSource::~CompoundFileSource() { 
+	for (size_t sz = mStack.size(); sz; sz--) {
+		delete mStack.front();
+		mStack.pop_front();
+	}
+
+	for (size_t sz = mComplete.size(); sz; sz--) {
+		delete mComplete.front();
+		mComplete.pop_front();
+	}
+
+	if (state() != CLOSED) close(); 
+};
+
 // Place a file on the stack.
-bool CompoundFileSource::place(std::string const& filename, bool top) {
+template <typename tag_t, typename... TagArgs>
+bool CompoundFileSource::place(std::string const& file, TagArgs... args, bool top) {
 	// State handling...
 	if (state() == ERROR) return false;
 
 	// initialize the new context
-	FileContext* context = new FileContext(filename, "", NULL, 0);
+	FileContext* context = new FileContext(file, NULL, 0, args);
 
 	// Step 1) Validate the name..
 	//if (!boost::filesystem::native(filename)) {
 	//	// The file's name isn't a valid format.
 	//	delete context;
 	//	return false;
-	//}
+	//}8
 
 
 	// Step 2) Attempt to resolve the file.
 
 	// Try the present working directory...
-	boost::filesystem::path filepath = boost::filesystem::absolute(filename);
+	boost::filesystem::path filepath = boost::filesystem::absolute(file);
 
 	// Check if we (eventually) found it.
 	if (!boost::filesystem::exists(filepath)) {
@@ -106,9 +128,6 @@ bool CompoundFileSource::place(std::string const& filename, bool top) {
 		delete context;
 		return false;
 	}
-
-	// Resolve all symlinks and finalize the path we're using.
-	context->resolved = boost::filesystem::canonical(filepath).string();
 
 	// Step 3) Ensure the file is readable and open it.
 	try {
@@ -139,15 +158,21 @@ bool CompoundFileSource::place(std::string const& filename, bool top) {
 }
 
 // Pops the top file context off the stack.
+template <typename tag_t, typename... TagArgs>
 bool CompoundFileSource::nextFile() {
 	if (state() == ERROR) return false;
 
 	size_t size = mStack.size();
 
+	
 	// pop off the old state.
-	if (size > 1) {
-		delete mStack.front();
+	// keep it around for a little while though.
+	if (size) {
+		mComplete.push_back(mStack.front());
 		mStack.pop_front();
+	}
+
+	if (size > 1) {
 		state(GOOD);
 	} else {
 		state(END);
@@ -155,48 +180,51 @@ bool CompoundFileSource::nextFile() {
 	return state() == GOOD;
 }
 
+template <typename tag_t, typename... TagArgs>
 void CompoundFileSource::reset() {
 	if (source()) {
 		source()->clear();
-		state(GOOD);
+		if (state() == ERROR) state(GOOD);
 	} else {
 		state(END);
 	}
 }
 
 // Closes the stream, freeing all available resourced.
+template <typename tag_t, typename... TagArgs>
 void CompoundFileSource::close() {
-	for (std::list<FileContext*>::iterator it = mStack.begin(); it != mStack.end(); it++) {
-		delete *it;
-	}
 	mStack.clear();
 	state(CLOSED);
 }
 
 // Places a number of buffered characters into the input stream to be reread later.
+template <typename tag_t, typename... TagArgs>
 bool CompoundFileSource::putback(char const* c, std::streamsize n) {
 	FileContext* context;
 	std::streamsize newpos;
 
 	switch (state()) {
 	case END:
+	case END_OF_FILE:
 	case GOOD:
 		// We should have the last file that we read from
 		// at the top of stack, so let's add it to the buffer
 		context = mStack.front();
 		newpos = context->bufpos + n;
 
-		if (n >= context->bufsize) {
+		if (newpos >= context->bufsize) {
 			// Overflow, expand the buffer.
-			context->bufsize = (size_t)(((n + 1) / BUFFER_BLOCK_SIZE) + 1) * BUFFER_BLOCK_SIZE;
+			context->bufsize = (size_t)(((newpos + 1) / BUFFER_BLOCK_SIZE) + 1) * BUFFER_BLOCK_SIZE;
 			context->buf = (char*)realloc(context->buf, context->bufsize);
 		}
 
 		// Copy the contents...
 		// Note that this should be done in reverse order, so the last
 		// part of the buffer comes out first.
-		reverse_copy(c, context->buf + context->bufpos, (size_t)n);
+		reverse_copy(context->buf + context->bufpos, c, n);
+
 		context->bufpos = (size_t)newpos;
+
 		return true;
 
 	case ERROR:
@@ -207,23 +235,26 @@ bool CompoundFileSource::putback(char const* c, std::streamsize n) {
 	}
 }
 
+
 // Imbues the steam with a provided locality for locality sensitive operations.
+template <typename tag_t, typename... TagArgs>
 void CompoundFileSource::imbue(std::locale const& loc) {
 	mLocale = loc;
 
 	// Propogate the changes to each of the open streams.
-	for (std::list<FileContext*>::iterator it = mStack.begin(); it != mStack.end(); it++) {
-		if ((*it)->source) (*it)->source->imbue(mLocale);
+	for (std::list<FileContext>::iterator it = mStack.begin(); it != mStack.end(); it++) {
+		if (it->source) (*it)->source->imbue(mLocale);
 	}
 }
 
 // Reads from any open files
+template <typename tag_t, typename... TagArgs>
 std::streamsize CompoundFileSource::read(char* c, std::streamsize n) {
 	std::streamsize needed = n;
 
-	// If we've already hit then end, make sure to tell them.
+	// If we've already hit the end, make sure to tell them.
 	if (state() == END) return -1;
-
+	if (state() == END_OF_FILE && !autoAdvance()) return -1;
 
 	// Read from each file starting from the top until we have 
 	// all the characters we that we need (or run out of files).
@@ -248,10 +279,13 @@ std::streamsize CompoundFileSource::read(char* c, std::streamsize n) {
 				// We've read the entire file.
 				needed -= context->source->gcount();
 				c += context->source->gcount();
-				nextFile();
+
+				// Flag that we've reached the end of the file or continue to the next file.
+				if (autoAdvance()) nextFile();
+				else state(END_OF_FILE);
 			} else if (context->source->fail()) {
 				// Something just went horribly wrong...
-				error();
+				state(ERROR);
 			} else {
 				// Everything is a-ok and we have everything we need!
 				needed = 0;
