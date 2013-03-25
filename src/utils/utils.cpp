@@ -20,44 +20,23 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#pragma once
 
-#include <list>
-#include <iostream>
+#include "utils/utils.h"
 
-#include "elements/Identifier_base.h"
-#include "config.h"
+#include <cstdlib>
 
 
 namespace cplus_parser {
+namespace utils {
 
-// Outputs the original full name of the element, including parameters.
-template <typename pelem_base_t>
-std::ostream& Identifier_base<pelem_base_t>::fullName(std::ostream& out) const
-{
-	out << baseName();
-	if(arity()) {
-		out << "(";
-		int i = 0;
-		for(typename std::list<pelem_base_t*>::const_iterator vIter = paramsBegin(); vIter != paramsEnd(); vIter++) {
-			if(*vIter)
-			{
-				if(i++ > 0)	out <<",";
-				(*vIter)->fullName(out);
-			}
+// Copies the contents of one array to the other in reverse order.
+void reverse_copy(char *dest, char const*src, size_t n) {
+		size_t max_i = n-1;
+
+		for (size_t i = 0; i < n; i++) {
+			dest[max_i - i] = src[i];
 		}
-		out << ")";
-	}
-	return out;
 }
 
-// Destructor.
-template <typename pelem_base_t>
-Identifier_base<pelem_base_t>::~Identifier_base()
-{
-	for(typename std::list<pelem_base_t*>::iterator vIter = paramsBegin(); vIter != paramsEnd(); vIter++) {
-		if(*vIter) delete *vIter;
-	}
-}
 
-}; /* end namespace cplus_parser */
+};}; /* end namespace cplus_parser::utils */

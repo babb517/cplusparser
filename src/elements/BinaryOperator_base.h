@@ -33,9 +33,6 @@
 
 namespace cplus_parser {
 
-template <typename pelem_base_t>
-class BinaryWrapper_base;
-
 /**
  * Represents a binary operator and the associated elements it operates on.
  * @type pelem_base_t The base ParseElement class in use, must be a descendant of ParseElement_base.
@@ -48,13 +45,10 @@ class BinaryOperator_base : public pelem_base_t
 		"pelem_base_t must be a descendant of ParseElement_base"
 	);
 
-	// The wrapper class is used to efficiently use a new operator in a readonly environment.
-	friend class SimpleBinaryOperatorWrapper<pelem_base_t>;
-
 public:
 
 	/// Enum of the kinds of unary operators this class can be.
-	typedef enum {
+	enum BinaryOperatorType {
 		BOP_UNKNOWN,
 		BOP_PLUS,
 		BOP_MINUS,
@@ -74,7 +68,7 @@ public:
 		BOP_LTHAN_EQ,
 		BOP_GTHAN_EQ,
 		BOP_BIND_STEP
-	} BinaryOperatorType;
+	} ;
 
 private:
 		enum BinaryOperatorType mOpType; ///< Which kind of operator an instance represents.
@@ -97,7 +91,7 @@ public:
 
 	// inherted stuffs
 	virtual std::ostream& fullName(std::ostream& out) const;
-	inline virtual pelem_base_t* copy() const					{ return new SimpleBinaryOperator<pelem_base_t>(preOp()->copy(), opType(), postOp()->copy(), parens()); }
+	inline virtual pelem_base_t* copy() const					{ return new BinaryOperator_base<pelem_base_t>(preOp()->copy(), opType(), postOp()->copy(), pelem_base_t::parens()); }
 
 	/// Gets the operator's type.
 	inline BinaryOperatorType opType() const 					{ return mOpType; }

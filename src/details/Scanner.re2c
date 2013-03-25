@@ -1,0 +1,387 @@
+/*
+ * Copyright (c) 2010-2013 <Joseph Babb, Michael Cassollary, Joohyung Lee>
+ *
+ * For information on how to contact the authors, please visit
+ *	http://reasoning.eas.asu.edu/cplus2asp
+ *
+ * This file is part of the cplus2asp system.
+ *
+ * cplus2asp is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * cplus2asp is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+#include <string>
+#include <limits>
+#include <cstring>
+#include <sstream>
+
+#include "details/CompoundFileStream.h"
+#include "details/Token.h"
+#include "details/Scanner.h"
+
+namespace cplus_parser {
+namespace details {
+
+#define ACTION_MATCH()												\
+	if (mCursor - lastnl > _tag->noloc)								\
+		_tag->col = mCursor - lastnl;
+		
+#define ACTION_BEGIN_TOK()											\
+	mBegin = mCursor;
+
+#define ACTION_NEWLINE()											\
+	if (!_tag->noloc) {												\
+		_tag->line++;												\
+		_tag->col = 1;												\
+		lastnl = mCursor - 1;										\
+	} else {														\
+		_tag->noloc -= mCursor - lastnl;							\
+		if (_tag->noloc < 0) _tag->noloc = 0;						\
+	}
+
+#define INIT_STR_TOK(x)												\
+	token.init(x, new std::string(mBegin, (size_t)(mCursor - mBegin - 1)));
+
+#define INIT_STR_TOK_STR(x,str)										\
+	token.init(x, new std::string(str));							\
+	token.loc_end(_tag->name, _tag->line, _tag->col)
+
+#define INIT_STR_TOK_OFFSET(x,offset0,offset1)						\
+	token.init(x, new std::string(mBegin + offset0, (size_t)(mCursor - mBegin - 1 - offset0 - offset1)))
+
+#define INIT_VOID_TOK(x)											\
+	token.init(x, NULL);											\
+	token.loc_end(_tag->name, _tag->line, _tag->col)
+
+#define ERROR(msg)													\
+	handler()->message(												\
+		token.loc(),												\
+		MessageHandler::msgflag(MessageHandler::MSG_ERROR, 0),		\
+		msg)
+
+/*********************************************************************************/
+/* Constants */
+/*********************************************************************************/
+size_t const Scanner::BUFFER_SIZE = 1024;
+size_t const Scanner::INVALID_POS = std::numeric_limits<size_t>::max();
+
+/*********************************************************************************/
+/* Methods */
+/*********************************************************************************/
+/// Analyzes the input stream and returns the next token.
+bool Scanner::lex(Token& token) {
+	FileDescriptor* _tag = tag();
+
+	mBegin = mCursor;
+
+	char* lastnl = mCursor - _tag->col;
+
+	// setup the location
+	token.loc_init(_tag->name, _tag->line, _tag->col);
+
+	if (!_tag) {
+		token.init(T_EOF,NULL);
+		return false;
+	}
+
+	/*!re2c
+		re2c:define:YYCTYPE					= "char";
+
+		re2c:define:YYCURSOR				= mCursor;
+		re2c:define:YYMARKER				= mMarker;
+		re2c:define:YYLIMIT					= mLimit;
+
+		re2c:define:YYFILL					= fill;
+
+		re2c:define:YYSETCONDITION			= condition;
+		re2c:define:YYGETCONDITION			= condition;
+
+		re2c:indent:top						= 3;
+		re2c:yyfill:enable					= 1;
+
+
+		NL									= [\n];
+		WHITESPACE							= [ \f\r\t\v];
+		INTEGER								= [0-9]+;
+		IDENTIFIER							= [A-Za-z_][a-zA-Z0-9_]+;
+
+		<!*>														{ ACTION_MATCH(); }
+
+		<CODE> WHITESPACE+											{ INIT_STR_TOK(T_WHITESPACE); }
+
+		<CODE> NL													{ ACTION_NEWLINE(); }
+		<STRING_S, STRING_D> NL										{ ACTION_NEWLINE(); }
+		<COMMENT> NL							=> CODE				{ INIT_STR_TOK(T_COMMENT); ACTION_NEWLINE(); return T_COMMENT; }
+		<BL_COMMENT> NL												{ INIT_STR_TOK(T_COMMENT); ACTION_NEWLINE(); return T_COMMENT; }
+		<ASP> NL													{ INIT_STR_TOK(T_ASP);	   ACTION_NEWLINE(); return T_ASP; }
+		<LUA> NL													{ INIT_STR_TOK(T_LUA);	   ACTION_NEWLINE(); return T_LUA; }
+
+		<CODE> [/][*]							=> BL_COMMENT		{ ACTION_BEGIN_TOK(); }
+		<CODE> [%]								=> COMMENT			{ ACTION_BEGIN_TOK(); }
+		<CODE> ":-" WHITESPACE* "begin_asp."	=> ASP				{ INIT_STR_TOK_STR(T_ASP, "% ~ begin ASP block ~"); return T_ASP; }
+		<CODE> ":-" WHITESPACE* "begin_lua."	=> LUA				{ INIT_STR_TOK_STR(T_LUA, "% ~ begin LUA block ~"); return T_LUA; }
+		<CODE> ["]								=> STRING_D			{ ACTION_BEGIN_TOK(); }
+		<CODE> [']								=> STRING_S			{ ACTION_BEGIN_TOK(); }
+
+		<BL_COMMENT> [*][/]						=> CODE				{ INIT_STR_TOK_OFFSET(T_COMMENT,0,2); return T_COMMENT; }
+		<ASP> ":-" WHITESPACE* "end_asp."		=> CODE				{ INIT_STR_TOK_STR(T_ASP, "% ~ end of ASP block ~\n"); return T_ASP; }
+		<LUA> ":-" WHITESPACE* "end_lua."		=> CODE				{ INIT_STR_TOK_STR(T_LUA, "% ~ end of LUA block ~\n"); return T_LUA; }
+		<STRING_S> [\\][']											{ }
+		<STRING_S> [']							=> CODE				{ INIT_STR_TOK_OFFSET(T_STRING,0,1); }
+		<STRING_D> [\\]["]											{ }
+		<STRING_D> ["]							=> CODE				{ INIT_STR_TOK_OFFSET(T_STRING,0,1); }
+
+		<CODE> "constants"											{ INIT_VOID_TOK(T_CONSTANTS);			return T_CONSTANTS; }
+		<CODE> "include"											{ INIT_VOID_TOK(T_INCLUDE);				return T_INCLUDE; }
+		<CODE> "macros"												{ INIT_VOID_TOK(T_MACROS);				return T_MACROS; }
+		<CODE> "objects"											{ INIT_VOID_TOK(T_OBJECTS);				return T_OBJECTS; }
+		<CODE> "query"												{ INIT_VOID_TOK(T_QUERY);				return T_QUERY; }
+		<CODE> "show"												{ INIT_VOID_TOK(T_SHOW);				return T_SHOW; }
+		<CODE> "sorts"												{ INIT_VOID_TOK(T_SORTS);				return T_SORTS; }
+		<CODE> "variables"											{ INIT_VOID_TOK(T_VARIABLES);			return T_VARIABLES; }
+
+		<CODE> "abAction"											{ INIT_VOID_TOK(T_ABACTION);			return T_ABACTION; }
+		<CODE> "action"												{ INIT_VOID_TOK(T_ACTION);				return T_ACTION; }
+		<CODE> "additiveAction"										{ INIT_VOID_TOK(T_ADDITIVEACTION);		return T_ADDITIVEACTION; }
+		<CODE> "additiveFluent"										{ INIT_VOID_TOK(T_ADDITIVEFLUENT);		return T_ADDITIVEFLUENT; }
+		<CODE> "after"												{ INIT_VOID_TOK(T_AFTER);				return T_AFTER; }
+		<CODE> "always"												{ INIT_VOID_TOK(T_ALWAYS);				return T_ALWAYS; }
+		<CODE> "attribute"											{ INIT_VOID_TOK(T_ATTRIBUTE);			return T_ATTRIBUTE; }
+		<CODE> "assuming"											{ INIT_VOID_TOK(T_ASSUMING);			return T_ASSUMING; }
+		<CODE> "by"													{ INIT_VOID_TOK(T_BY);					return T_BY; }
+		<CODE> "caused"												{ INIT_VOID_TOK(T_CAUSED);				return T_CAUSED; }
+		<CODE> "causes"												{ INIT_VOID_TOK(T_CAUSES);				return T_CAUSES; }
+		<CODE> "impossible"											{ INIT_VOID_TOK(T_IMPOSSIBLE);			return T_IMPOSSIBLE; }
+		<CODE> "constraint"											{ INIT_VOID_TOK(T_CONSTRAINT);			return T_CONSTRAINT; }
+		<CODE> "decrements"											{ INIT_VOID_TOK(T_DECREMENTS);			return T_DECREMENTS; }
+		<CODE> "default"											{ INIT_VOID_TOK(T_DEFAULT);				return T_DEFAULT; }
+		<CODE> "dynamicAbnormality"									{ INIT_VOID_TOK(T_DYNAMICAB);			return T_DYNAMICAB; }
+		<CODE> "exogenousAction"									{ INIT_VOID_TOK(T_EXOGENOUSACTION);		return T_EXOGENOUSACTION; }
+		<CODE> "exogenous"											{ INIT_VOID_TOK(T_EXOGENOUS);			return T_EXOGENOUS; }
+		<CODE> "if"													{ INIT_VOID_TOK(T_IF);					return T_IF; }
+		<CODE> "increments"											{ INIT_VOID_TOK(T_INCREMENTS);			return T_INCREMENTS; }
+		<CODE> "inertial"											{ INIT_VOID_TOK(T_INERTIAL);			return T_INERTIAL; }
+		<CODE> "inertialFluent"										{ INIT_VOID_TOK(T_INERTIALFLUENT);		return T_INERTIALFLUENT; }
+		<CODE> "label"												{ INIT_VOID_TOK(T_LABEL);				return T_LABEL; }
+		<CODE> "may cause"											{ INIT_VOID_TOK(T_MAY_CAUSE);			return T_MAY_CAUSE; }
+		<CODE> "maxAdditive"										{ INIT_VOID_TOK(T_MAXADDITIVE);			return T_MAXADDITIVE; }
+		<CODE> "maxstep"											{ INIT_VOID_TOK(T_MAXSTEP);				return T_MAXSTEP; }
+		<CODE> "never"												{ INIT_VOID_TOK(T_NEVER);				return T_NEVER; }
+		<CODE> "noconcurrency"										{ INIT_VOID_TOK(T_NOCONCURRENCY);		return T_NOCONCURRENCY; }
+		<CODE> "strong_noconcurrency" 								{ INIT_VOID_TOK(T_STRONG_NOCONCURRENCY);return T_STRONG_NOCONCURRENCY; }
+		<CODE> "nonexecutable"										{ INIT_VOID_TOK(T_NONEXECUTABLE);		return T_NONEXECUTABLE; }
+		<CODE> "of"													{ INIT_VOID_TOK(T_OF);					return T_OF; }
+		<CODE> "possibly caused"									{ INIT_VOID_TOK(T_POSSIBLY_CAUSED);		return T_POSSIBLY_CAUSED; }
+		<CODE> "rigid"												{ INIT_VOID_TOK(T_RIGID);				return T_RIGID; }
+		<CODE> "sdFluent"											{ INIT_VOID_TOK(T_SDFLUENT);			return T_SDFLUENT; }
+		<CODE> "simpleFluent"										{ INIT_VOID_TOK(T_SIMPLEFLUENT);		return T_SIMPLEFLUENT; }
+		<CODE> "staticAbnormality"									{ INIT_VOID_TOK(T_STATICAB);			return T_STATICAB; }
+		<CODE> "unless"												{ INIT_VOID_TOK(T_UNLESS);				return T_UNLESS; }
+		<CODE> "when"												{ INIT_VOID_TOK(T_WHEN);				return T_WHEN; }
+		<CODE> "following"											{ INIT_VOID_TOK(T_FOLLOWING);			return T_FOLLOWING; }
+		<CODE> "where"												{ INIT_VOID_TOK(T_WHERE);				return T_WHERE; }
+
+		<CODE> ":-"													{ INIT_VOID_TOK(T_COLON_DASH);			return T_COLON_DASH; }
+		<CODE> "::"													{ INIT_VOID_TOK(T_DBL_COLON);			return T_DBL_COLON; }
+		<CODE> ":"													{ INIT_VOID_TOK(T_COLON);				return T_COLON; }
+
+		<CODE> "->>"												{ INIT_VOID_TOK(T_IMPL);				return T_IMPL; }
+		<CODE> "->"													{ INIT_VOID_TOK(T_ARROW_RDASH);			return T_ARROW_RDASH; }
+		<CODE> "-"													{ INIT_VOID_TOK(T_DASH);				return T_DASH; }
+
+		<CODE> "<->"												{ INIT_VOID_TOK(T_EQUIV);				return T_EQUIV; }
+		<CODE> "<-"													{ INIT_VOID_TOK(T_ARROW_LDASH);			return T_ARROW_LDASH; }
+		<CODE> "<="													{ INIT_VOID_TOK(T_ARROW_LEQ);			return T_ARROW_LEQ; }
+		<CODE> "<>"													{ INIT_VOID_TOK(T_NOT_EQ);				return T_NOT_EQ; }
+		<CODE> "<"													{ INIT_VOID_TOK(T_LTHAN);				return T_LTHAN; }
+
+		<CODE> ">="													{ INIT_VOID_TOK(T_GTHAN_EQ);			return T_GTHAN_EQ; }
+		<CODE> ">>"													{ INIT_VOID_TOK(T_DBL_GTHAN);			return T_DBL_GTHAN; }
+		<CODE> ">"													{ INIT_VOID_TOK(T_GTHAN);				return T_GTHAN; }
+
+		<CODE> "@<"													{ INIT_VOID_TOK(T_LTHAN);				return T_LTHAN; }
+		<CODE> "@>="												{ INIT_VOID_TOK(T_GTHAN_EQ);			return T_GTHAN_EQ; }
+		<CODE> "@>"													{ INIT_VOID_TOK(T_GTHAN);				return T_GTHAN; }
+		<CODE> "@=<"												{ INIT_VOID_TOK(T_EQ_LTHAN);			return T_EQ_LTHAN; }
+		<CODE> "@"													{ INIT_VOID_TOK(T_AT);					return T_AT; }
+
+		<CODE> "=>"													{ INIT_VOID_TOK(T_ARROW_REQ);			return T_ARROW_REQ; }
+		<CODE> "=<"													{ INIT_VOID_TOK(T_EQ_LTHAN);			return T_EQ_LTHAN; }
+		<CODE> "=="													{ INIT_VOID_TOK(T_DBL_EQ);				return T_DBL_EQ; }
+		<CODE> "="													{ INIT_VOID_TOK(T_EQ);					return T_EQ; }
+
+		<CODE> "&&"													{ INIT_VOID_TOK(T_AMP);					return T_AMP; }
+		<CODE> "&"													{ INIT_VOID_TOK(T_AMP);					return T_AMP; }
+		<CODE> "++"													{ INIT_VOID_TOK(T_DBL_PLUS);			return T_DBL_PLUS; }
+		<CODE> "+"													{ INIT_VOID_TOK(T_PLUS);				return T_PLUS; }
+
+		<CODE> ".."													{ INIT_VOID_TOK(T_DBL_PERIOD);			return T_DBL_PERIOD; }
+		<CODE> "."													{ INIT_VOID_TOK(T_PERIOD);				return T_PERIOD; }
+
+		<CODE> "\\="												{ INIT_VOID_TOK(T_NOT_EQ);				return T_NOT_EQ; }
+		<CODE> "\\/"												{ INIT_VOID_TOK(T_BIG_DISJ);			return T_BIG_DISJ; }
+
+		<CODE> "//"													{ INIT_VOID_TOK(T_INT_DIV);				return T_INT_DIV; }
+		<CODE> "/\\"												{ INIT_VOID_TOK(T_BIG_CONJ);			return T_BIG_CONJ; }
+
+		<CODE> ","													{ INIT_VOID_TOK(T_COMMA);				return T_COMMA; }
+		<CODE> ";"													{ INIT_VOID_TOK(T_SEMICOLON);			return T_SEMICOLON; }
+		<CODE> "|"													{ INIT_VOID_TOK(T_PIPE);				return T_PIPE; }
+		<CODE> "#"													{ INIT_VOID_TOK(T_POUND);				return T_POUND; }
+		<CODE> "*"													{ INIT_VOID_TOK(T_STAR);				return T_STAR; }
+
+		<CODE> "["													{ INIT_VOID_TOK(T_BRACKET_L);			return T_BRACKET_L; }
+		<CODE> "]"													{ INIT_VOID_TOK(T_BRACKET_R);			return T_BRACKET_R; }
+
+		<CODE> "("													{ INIT_VOID_TOK(T_PAREN_L);				return T_PAREN_L; }
+		<CODE> ")"													{ INIT_VOID_TOK(T_PAREN_R);				return T_PAREN_R; }
+
+		<CODE> "abs"												{ INIT_VOID_TOK(T_ABS);					return T_ABS; }
+		<CODE> "eq"													{ INIT_VOID_TOK(T_EQ);					return T_EQ; }
+		<CODE> "false"												{ INIT_VOID_TOK(T_FALSE);				return T_FALSE; }
+		<CODE> "mod"												{ INIT_VOID_TOK(T_MOD);					return T_MOD; }
+		<CODE> "neq"												{ INIT_VOID_TOK(T_NOT_EQ);				return T_NOT_EQ; }
+		<CODE> "none"												{ INIT_VOID_TOK(T_NONE);				return T_NONE; }
+		<CODE> "not"												{ INIT_VOID_TOK(T_NOT);					return T_NOT; }
+		<CODE> "true"												{ INIT_VOID_TOK(T_TRUE);				return T_TRUE; }
+
+		<CODE> INTEGER												{ INIT_STR_TOK(T_INTEGER);				return T_INTEGER; }
+		<CODE> IDENTIFIER											{ INIT_STR_TOK(T_IDENTIFIER);			return T_IDENTIFIER; }
+
+
+		<STRING_S,STRING_D,COMMENT,BL_COMMENT,ASP,LUA> [\EOF]		{ INIT_VOID_TOK(T_ERR); ERROR("Unexpected end of file");	return T_ERR; }
+		<CODE> [\EOF]												{ INIT_VOID_TOK(T_EOF);					return T_EOF; }
+
+		<CODE> .													{ INIT_STR_TOK(T_ERR); ERROR("Unexpected token");			return T_ERR; }
+	*/
+
+	return true;
+}
+
+// Appends a file to the end of the input stream.
+bool Scanner::appendFile(std::string const& file, std::string const& name) {
+	mNames.push_back(name);
+	return mInput->append(file, &(mNames.back())); 
+}
+
+// Appends a file to the end of the input stream.
+bool Scanner::insertFile(std::string const& file, std::string const& name) {
+	// This gets a little more complicated.
+	// We need to beginning reading from this file right away,
+	// however we've buffered a chunk of the current file for 
+	// RE2C to work with.
+
+	// We need to put back what we have first.
+	mInput->putback(mBegin, (std::streamsize)(mLimit - mBegin));
+	mLimit = mBegin = mCursor = mBuffer;
+
+	// Now we can continue.
+	mNames.push_back(name);
+	return mInput->insert(file, &(mNames.back()));
+}
+	
+// Injects a string at the input stream's current location to be read next.
+bool Scanner::inject(std::string const& str, bool noloc) {
+	// Sanity check: We're working on a file.
+	FileDescriptor* _tag = tag();
+	if (!_tag) return false;
+
+	// update noloc
+	if (noloc) _tag->noloc += str.size();
+
+	// We need to put back what we have first.
+	mInput->putback(mBegin, (std::streamsize)(mLimit - mBegin));
+	mLimit = mBegin = mCursor = mBuffer;
+
+	// Now we can continue.
+	mInput->putback(str.c_str(), str.size());
+}
+
+
+void Scanner::fill(size_t len) {
+	bool err = false;
+	size_t got = 0;
+
+	// readjust the beginning of the buffer when necessary...
+	if (mCursor + len >= mBufEnd - 1) {
+		shift();
+	}
+
+	FileDescriptor* _tag = tag();
+
+	if (!_tag) {
+		// no available files, pad the buffer with EOF
+		memset(mLimit, EOF, len);
+		mLimit += len;
+		return;
+	}
+	
+	// fill the buffer
+	do {
+		// read the input.
+		mInput.read(mLimit + got, (std::streamsize)len);
+		
+		got += mInput.gcount();
+
+		// error checking and handling.
+		// Try recovering once to avoid an infinite loop.
+		if (mInput->eof()) {
+			advance();
+		} else if ((mInput.bad() || mInput->error()) && (!err || mInput.gcount())) {
+			err = true;
+			mInput->reset();
+			mInput.clear();
+		} else if (mInput.gcount()) {
+			err = false;
+		}
+	
+	} while (len > got && mInput->good() && mInput.good());
+
+	// adjust the limit
+	mLimit += got;
+
+	if (mInput->error() || mInput.bad()) {
+		// Tell them we're having issues.
+		handler()->message(
+			MessageHandler::msgflag(MessageHandler::MSG_ERROR, 0), 
+			"An error occurred while reading '%s'.", tag()->name->c_str());
+
+		// skip this file.
+		advance();
+	}
+}
+
+// Move to the next file in the list.
+void Scanner::advance() {
+	mInput->nextFile();
+	mInput.clear();
+	mInput->reset();
+
+	// push a blank token onto the input to ensure that tokens don't cross files.
+	if (mLimit == mBufEnd) shift();
+	*mLimit = ' ';
+	mLimit++;
+
+}
+
+// Shifts re2c's position back to the beginning.
+void Scanner::shift() {
+	memmove(mBuffer, mBegin, (size_t)(mLimit - mBegin));
+	mLimit -= mBegin - mBuffer;
+	mMarker -= mBegin - mBuffer;
+	mCursor -= mBegin - mBuffer;
+	mBegin = mBuffer;
+}
+
+
+};}; /* End namespace cplus_parser::details */

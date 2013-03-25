@@ -31,6 +31,28 @@
 namespace cplus_parser {
 
 /**
+ * @brief A list of the different causal law forms.
+ */
+typedef enum {
+	CL_CAUSED,							///< A basic causal law						'caused F if G ifcons G2 after H unless U when M following N where X'.
+	CL_CAUSES,							///< A 'causes' shortcut law				'H causes F if G unless U when M where X'.
+	CL_EXOGENOUS,						///< exogenous shortcut law					'exogenous c where X'.
+	CL_INERTIAL,						///< inertial shortcut law					'inertial c where X'.
+	CL_RIGID,							///< rigid shortcut law						'rigid c where X'.8
+	CL_DEFAULT,							///< default shortcut law.					'default F where X'.
+	CL_NONEXECUTABLE,					///< nonexecutable shortcut law				'nonexecutable F if G when M where X.
+	CL_CONSTRAINT,						///< constraint shortcut law.				'constraint F after H unless U when M following N where X'.
+	CL_NEVER,							///< never shortcut law.					'never F after H unless U when M following N where X'.
+	CL_IMPOSSIBLE,						///< impossible shortcut law.				'impossible F after H unless U when M following N where X'.
+	CL_ALWAYS,							///< always shortcut law.					'always F when M where X'.
+	CL_MAY_CAUSE,						///< may cause shortcut law.				'H may cause F if G when M where X'.
+	CL_POSSIBLY_CAUSED,					///< possibly caused shortcut law.			'possibly caused F if G ifcons G2 after H unless U when M following N where X'.
+	CL_INCREMENTS,						///< increments additive causal law.		'H increments F by B if G when M where X'.	
+	CL_DECREMENTS						///< decrements additive causal law.		'H decrements F by B if G when M where X'.
+
+} CausalLawType;
+
+/**
  * @brief A statement representing a variety of different causal laws.
  */
 template<typename pelem_base_t>
@@ -45,27 +67,7 @@ public:
 	/************************************************************/
 	/* Types */
 	/************************************************************/
-	/**
-	 * @brief A list of the different causal law forms.
-	 */
-	typedef enum {
-		CL_CAUSED,							///< A basic causal law						'caused F if G ifcons G2 after H unless U when M following N where X'.
-		CL_CAUSES,							///< A 'causes' shortcut law				'H causes F if G unless U when M where X'.
-		CL_EXOGENOUS,						///< exogenous shortcut law					'exogenous c where X'.
-		CL_INERTIAL,						///< inertial shortcut law					'inertial c where X'.
-		CL_RIGID,							///< rigid shortcut law						'rigid c where X'.8
-		CL_DEFAULT,							///< default shortcut law.					'default F where X'.
-		CL_NONEXECUTABLE,					///< nonexecutable shortcut law				'nonexecutable F if G when M where X.
-		CL_CONSTRAINT,						///< constraint shortcut law.				'constraint F after H unless U when M following N where X'.
-		CL_NEVER,							///< never shortcut law.					'never F after H unless U when M following N where X'.
-		CL_IMPOSSIBLE,						///< impossible shortcut law.				'impossible F after H unless U when M following N where X'.
-		CL_ALWAYS,							///< always shortcut law.					'always F when M where X'.
-		CL_MAY_CAUSE,						///< may cause shortcut law.				'H may cause F if G when M where X'.
-		CL_POSSIBLY_CAUSED,					///< possibly caused shortcut law.			'possibly caused F if G ifcons G2 after H unless U when M following N where X'.
-		CL_INCREMENTS,						///< increments additive causal law.		'H increments F by B if G when M where X'.	
-		CL_DECREMENTS						///< decrements additive causal law.		'H decrements F by B if G when M where X'.
 
- 	} CausalLawType;
 
 
 private:
@@ -106,7 +108,7 @@ public:
 	 */
 	inline CausalLaw(
 		CausalLawType _type,
-		pelem_base_t* _action
+		pelem_base_t* _action,
 		pelem_base_t* _head,
 		pelem_base_t* _by,
 		pelem_base_t* _if,
@@ -118,7 +120,7 @@ public:
 		pelem_base_t* _where
 		)
 		: Statement<pelem_base_t>(CAUSAL_LAW), mType(_type), mAction(_action),
-		mHead(_head), mBy(_by), mIf(_if), mIfcons(_ifCons), 
+		mHead(_head), mBy(_by), mIf(_if), mIfcons(_ifcons), 
 		mAfter(_after), mUnless(_unless), mWhen(_when), 
 		mFollowing(_following), mWhere(_where)
 	{ /* Intentionally Left Blank */ }
@@ -132,7 +134,7 @@ public:
 		if (mHead) delete mHead;
 		if (mBy) delete mBy;
 		if (mIf) delete mIf;
-		if (mIfCons) delete mIfCons;
+		if (mIfcons) delete mIfcons;
 		if (mAfter) delete mAfter;
 		if (mUnless) delete mUnless;
 		if (mWhen) delete mWhen;
@@ -173,7 +175,6 @@ public:
 
 	/// Makes a 'caused' causal law.
 	/// 'caused F if G ifcons G2 after H unless U when M following N where X'.
-	template <typename pelem_base_t>
 	static inline CausalLaw<pelem_base_t>* mkCaused(
 		pelem_base_t* _head,
 		pelem_base_t* _if,
@@ -188,7 +189,6 @@ public:
 
 	/// Makes a 'causes' causal law.
 	/// 'H causes F if G unless U when M where X'.
-	template <typename pelem_base_t>
 	static inline CausalLaw<pelem_base_t>* mkCauses(
 		pelem_base_t* _action,
 		pelem_base_t* _head,
@@ -200,7 +200,6 @@ public:
 
 	/// Makes an 'exogenous' causal law.
 	/// 'exogenous c where X'.
-	template <typename pelem_base_t>
 	static inline CausalLaw<pelem_base_t>* mkExogenous(
 		pelem_base_t* _head,
 		pelem_base_t* _where
@@ -209,7 +208,6 @@ public:
 
 	/// Makes an 'inertial' causal law.
 	/// 'inertial c where X'.
-	template <typename pelem_base_t>
 	static inline CausalLaw<pelem_base_t>* mkInertial(
 		pelem_base_t* _head,
 		pelem_base_t* _where
@@ -218,7 +216,6 @@ public:
 
 	/// Makes a 'rigid' causal law.
 	/// 'rigid c where X'.
-	template <typename pelem_base_t>
 	static inline CausalLaw<pelem_base_t>* mkRigid(
 		pelem_base_t* _head,
 		pelem_base_t* _where
@@ -227,7 +224,6 @@ public:
 
 	/// Makes a 'default' causal law.
 	/// 'default F where X'.
-	template <typename pelem_base_t>
 	static inline CausalLaw<pelem_base_t>* mkDefault(
 		pelem_base_t* _head,
 		pelem_base_t* _where
@@ -236,7 +232,6 @@ public:
 
 	/// Makes a 'nonexecutable' causal law.
 	/// 'nonexecutable F if G when M where X.
-	template <typename pelem_base_t>
 	static inline CausalLaw<pelem_base_t>* mkNonexecutable(
 		pelem_base_t* _head,
 		pelem_base_t* _if,
@@ -247,7 +242,6 @@ public:
 
 	/// Makes a 'constraint' causal law.
 	/// 'constraint F after H unless U when M following N where X'.
-	template <typename pelem_base_t>
 	static inline CausalLaw<pelem_base_t>* mkConstraint(
 		pelem_base_t* _head,
 		pelem_base_t* _after,
@@ -260,7 +254,6 @@ public:
 
 	/// Makes a 'never' causal law.
 	/// 'never F after H unless U when M following N where X'.
-	template <typename pelem_base_t>
 	static inline CausalLaw<pelem_base_t>* mkNever(
 		pelem_base_t* _head,
 		pelem_base_t* _after,
@@ -273,7 +266,6 @@ public:
 
 	/// Makes an 'impossible' causal law.
 	/// 'impossible F after H unless U when M following N where X'.
-	template <typename pelem_base_t>
 	static inline CausalLaw<pelem_base_t>* mkImpossible(
 		pelem_base_t* _head,
 		pelem_base_t* _after,
@@ -286,7 +278,6 @@ public:
 
 	/// Makes an 'always' causal law.
 	/// 'always F when M where X'.
-	template <typename pelem_base_t>
 	static inline CausalLaw<pelem_base_t>* mkAlways(
 		pelem_base_t* _head,
 		pelem_base_t* _when,
@@ -301,7 +292,6 @@ public:
 
 	/// Makes a 'may cause' causal law.
 	/// 'H may cause F if G when M where X'.
-	template <typename pelem_base_t>
 	static inline CausalLaw<pelem_base_t>* mkMayCause(
 		pelem_base_t* _action,
 		pelem_base_t* _head,
@@ -313,7 +303,6 @@ public:
 
 	/// Makes a 'possibly caused' causal law.
 	/// 'possibly caused F if G ifcons G2 after H unless U when M following N where X'.
-	template <typename pelem_base_t>
 	static inline CausalLaw<pelem_base_t>* mkPossiblyCaused(
 		pelem_base_t* _head,
 		pelem_base_t* _if,
@@ -328,7 +317,6 @@ public:
 
 	/// Makes a 'increments' causal law.
 	/// 'H increments F by B if G when M where X'.	
-	template <typename pelem_base_t>
 	static inline CausalLaw<pelem_base_t>* mkIncrements(
 		pelem_base_t* _action,
 		pelem_base_t* _head,
@@ -341,7 +329,6 @@ public:
 
 	/// Makes a 'decrements' causal law.
 	/// 'H decrements F by B if G when M where X'.	
-	template <typename pelem_base_t>
 	static inline CausalLaw<pelem_base_t>* mkDecrements(
 		pelem_base_t* _action,
 		pelem_base_t* _head,

@@ -38,7 +38,7 @@ std::ostream& Quantifier_base<pelem_base_t>::fullName(std::ostream& out) const
 	if(postOp() && numQuants())
 	{
 		out << "[ ";
-		for(QuantifierList::const_iterator lIter = quantsBegin(); lIter != quantsEnd(); lIter++)
+		for(typename QuantifierList::const_iterator lIter = quantsBegin(); lIter != quantsEnd(); lIter++)
 		{
 			if((*lIter) && (*lIter)->second)
 			{
@@ -65,9 +65,9 @@ std::ostream& Quantifier_base<pelem_base_t>::fullName(std::ostream& out) const
 
 template <typename pelem_base_t>
 pelem_base_t* Quantifier_base<pelem_base_t>::copy() const {
-	BigQuantifiers* res = new BigQuantifiers(NULL, NULL, parens());
+	Quantifier_base<pelem_base_t>* res = new Quantifier_base<pelem_base_t>(NULL, NULL, pelem_base_t::parens());
 	res->postOp((postOp()) ? postOp()->copy() : NULL);
-	for (QuantifierList::const_iterator it = quantsBegin(); it != quantsEnd(); it++) {
+	for (typename QuantifierList::const_iterator it = quantsBegin(); it != quantsEnd(); it++) {
 		if ((*it)->second)
 			res->addQuant(new Quantifier((*it)->first, (*it)->second->copy()));
 	}
@@ -77,7 +77,7 @@ pelem_base_t* Quantifier_base<pelem_base_t>::copy() const {
 // Detaches the operator's sub expression, returning it.
 template <typename pelem_base_t>
 pelem_base_t* Quantifier_base<pelem_base_t>::detachPostOp() {
-	ParseElement* ret = mPostOp;
+	pelem_base_t* ret = mPostOp;
 	mPostOp = NULL;
 	return ret;
 }
@@ -86,7 +86,7 @@ pelem_base_t* Quantifier_base<pelem_base_t>::detachPostOp() {
 template <typename pelem_base_t>
 Quantifier_base<pelem_base_t>::~Quantifier_base()
 {
-	for(QuantifierList::iterator lIter = quantsBegin(); lIter != quantsEnd(); lIter++)
+	for(typename QuantifierList::iterator lIter = quantsBegin(); lIter != quantsEnd(); lIter++)
 	{
 		if((*lIter)->second)
 		{

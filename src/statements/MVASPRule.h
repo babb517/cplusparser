@@ -48,7 +48,7 @@ public:
 	/* Types */
 	/***********************************************************************/
 	/// An iterator to iterator over the ASP rule's body.
-	typedef std::list<pelem_base_t*>::const_iterator const_iterator;
+	typedef typename std::list<pelem_base_t*>::const_iterator const_iterator;
 private:
 	/***********************************************************************/
 	/* Members */

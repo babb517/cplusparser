@@ -57,11 +57,12 @@ public:
 	/****************************************************************/
 	/**
 	 * @brief Initializes the include statement object.
+	 * @param The location of the include file.
 	 * @param files A list of files to add to the include statement initially.
 	 * NOTE: This object takes ownership of all memory associated with the files list.
 	 */
-	inline Include(std::list<std::string>* files = NULL) 
-		: Statement(INCLUDE) 
+	inline Include(Location const& loc, std::list<std::string>* files = NULL) 
+		: Statement<pelem_base_t>(StatementType::INCLUDE, loc) 
 	{
 		if (files) mFiles = files;
 		else mFiles = new std::list<std::string>();

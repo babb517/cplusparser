@@ -25,10 +25,26 @@
 #include <boost/type_traits/is_base_of.hpp>
 #include <boost/static_assert.hpp>
 
+#include "Location.h"
 #include "config.h"		// autoheader header
 
 
 namespace cplus_parser {
+
+/**
+ * A list of the various different kinds of statements that the parser can parse.
+ */
+typedef enum {
+	CAUSAL_LAW,							///< A general causal law that covers all possible forms. 
+	DECLARATION,						///< A block meant to declare various identifiers.
+	QUERY,								///< A statement providing query formulas to enforce upon selection.
+	INCLUDE,							///< An include statement.
+	MACROS,								///< A macros definition statement.
+	RULE_MV_ASP,						///< multi-valued ASP rule (p=v :- f1, f2, f3, ..., fn).
+	RULE_CAUSAL,						///< causal rule (F <= G).
+	FORMULA								///< General formula (F).
+
+} StatementType;
 
 /**
  * A top-level object for encapsulating a complete program statement.
@@ -46,27 +62,15 @@ public:
 	/************************************************************/
 	/* Types */
 	/************************************************************/
-	/**
-	 * A list of the various different kinds of statements that the parser can parse.
-	 */
-	typedef enum {
-		CAUSAL_LAW,							///< A general causal law that covers all possible forms. 
-		DECLARATION,						///< A block meant to declare various identifiers.
-		QUERY,								///< A statement providing query formulas to enforce upon selection.
-		INCLUDE,							///< An include statement.
-		MACROS,								///< A macros definition statement.
-		RULE_MV_ASP,						///< multi-valued ASP rule (p=v :- f1, f2, f3, ..., fn).
-		RULE_CAUSAL,						///< causal rule (F <= G).
-		FORMULA								///< General formula (F).
 
-	} StatementType;
+
 
 private:
 	/************************************************************/
 	/* Members */
 	/************************************************************/
 	StatementType mType;
-
+	Location mLoc;
 public:
 	/************************************************************/
 	/* Constructors / Destructors */
@@ -75,9 +79,11 @@ public:
 	 * @brief Basic constructor.
 	 * @param type The type of statement that this object represents.
 	 */
-	inline Statement(StatementType type)
-		: mType(type)
-	{ /* Intentionally Left Blank */ }
+	inline Statement(StatementType type, Location const& loc)
+		: mType(type), mLoc(loc)
+	{
+	
+	}
 
 	/**
 	 * @brief Dummy destructor.

@@ -22,42 +22,18 @@
 
 #pragma once
 
-#include <list>
-#include <iostream>
-
-#include "elements/Identifier_base.h"
-#include "config.h"
-
+#include <cstdlib>
 
 namespace cplus_parser {
+namespace utils {
 
-// Outputs the original full name of the element, including parameters.
-template <typename pelem_base_t>
-std::ostream& Identifier_base<pelem_base_t>::fullName(std::ostream& out) const
-{
-	out << baseName();
-	if(arity()) {
-		out << "(";
-		int i = 0;
-		for(typename std::list<pelem_base_t*>::const_iterator vIter = paramsBegin(); vIter != paramsEnd(); vIter++) {
-			if(*vIter)
-			{
-				if(i++ > 0)	out <<",";
-				(*vIter)->fullName(out);
-			}
-		}
-		out << ")";
-	}
-	return out;
-}
+/**
+ * @brief Copies the contents of one array to the other in reverse order.
+ * @param[out] dest The destination array.
+ * @param src The source array.
+ * @param n The number of character to copy.
+ */
+void reverse_copy(char *dest, char const*src, size_t n);
 
-// Destructor.
-template <typename pelem_base_t>
-Identifier_base<pelem_base_t>::~Identifier_base()
-{
-	for(typename std::list<pelem_base_t*>::iterator vIter = paramsBegin(); vIter != paramsEnd(); vIter++) {
-		if(*vIter) delete *vIter;
-	}
-}
 
-}; /* end namespace cplus_parser */
+};}; /* end namespace cplus_parser::utils */

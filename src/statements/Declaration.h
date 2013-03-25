@@ -31,11 +31,23 @@
 #include "config.h"		// autoheader header
 
 #include "statements/Statement.h"
+#include "Location.h"
 
 #include "elements/Binding.h"
 #include "elements/Identifier_base.h"
 
 namespace cplus_parser {
+
+/**
+ * @brief The various kinds of declarations that occur.
+ */
+enum DeclarationType {
+	DECL_CONSTANT,			///< A declaration of 1 or more constant identifiers.
+	DECL_VARIABLE,			///< A declaration of 1 or more variable identifiers.
+	DECL_SORT,				///< A declaration of 1 or more sort identifiers.
+	DECL_OBJECT				///< A declaration of 1 or more object identifiers.
+};
+
 
 /**
  * @brief A statement representing a declaration of various identifiers.
@@ -56,22 +68,12 @@ public:
 	/**************************************************************************/
 
 	/**
-	 * @brief The various kinds of declarations that occur.
-	 */
-	typedef enum {
-		CONSTANT,			///< A declaration of 1 or more constant identifiers.
-		VARIABLE,			///< A declaration of 1 or more variable identifiers.
-		SORT,				///< A declaration of 1 or more sort identifiers.
-		OBJECT				///< A declaration of 1 or more object identifiers.
-	} DeclarationType;
-
-	/**
 	 * @brief A single identifier's declaration.
 	 */
-	typedef struct {
+	struct IdentifierDecl {
 		Binder* binder;									///< The binder specifying identifier information.
 		Identifier_base<pelem_base_t>* identifier;		///< The identifier being bound by the binder.
-	} IdentifierDecl;
+	};
 
 public:
 
@@ -91,10 +93,10 @@ public:
 		/******************************************************/
 		/* Members */
 		/******************************************************/
-		std::list<Binding*>::const_iterator mOuterIt;						///< The outer iterator.
-		std::list<Identifier_base<pelem_base_t>*>::const_iterator mInnerIt;	///< The inner iterator.
+		typename std::list<Binding<pelem_base_t>*>::const_iterator mOuterIt;			///< The outer iterator.
+		typename std::list<Identifier_base<pelem_base_t>*>::const_iterator mInnerIt;	///< The inner iterator.
 
-		std::list<Binding*>::const_iterator mOuterEnd;						///< The end of the outer iterator.
+		typename std::list<Binding<pelem_base_t>*>::const_iterator mOuterEnd;			///< The end of the outer iterator.
 
 		IdentifierDecl mTempRef;											///< A temporary working space for each declaration.
 		bool mSet;															///< Whether the temp working space is valid.	
@@ -113,9 +115,10 @@ public:
 		 * @param inner The position of the inner iterator.
 		 * @param outerBound The end of the outer iterator.
 		 */
-		const_iterator(std::list<Binding*>::const_iterator const& outer, 
-			Binding::const_iterator const& inner,
-			std::list<Binding*>::const_iterator const& outerBound);
+		const_iterator(
+			typename std::list<Binding<pelem_base_t>*>::const_iterator const& outer, 
+			typename Binding<pelem_base_t*>::const_iterator const& inner,
+			typename std::list<Binding<pelem_base_t>*>::const_iterator const& outerBound);
 
 		/**
 		 * @brief Initializes the iterator to the position of the provided iterator.
@@ -147,22 +150,21 @@ public:
 		}
 
 		/// Gets the entry the iterator points to.
-		inline IdentifierDecl const& dereference const { if (!mSet) set(); return mTempRef; }
+		IdentifierDecl const& dereference() const { if (!mSet) set(); return mTempRef; }
 
 		/**
 		 * @brief updates the internal working area of the iterator with the current position.
 		 */
 		void set();
-
-	}
+	};
 
 private:
 
 	/**************************************************************************/
 	/* Members */
 	/**************************************************************************/
-	std::list<Binding*>* mBinderList;			///< The list of all binder statements in the declaration.
-	DeclarationType mType;						///< The type of identifier that this declaration is for.
+	std::list<Binding<pelem_base_t>*>* mBinderList;			///< The list of all binder statements in the declaration.
+	DeclarationType mType;									///< The type of identifier that this declaration is for.
 
 public:
 	/**************************************************************************/
@@ -172,13 +174,17 @@ public:
 	/**
 	 * @brief Initializes the declaration.
 	 * @param type The type of declaration that this object represents.
+	 * @param loc The location of declaration.
 	 * @param bindings A list of bindings that are included in this statement, or NULL to create an empty declaration statement.
 	 * NOTE: The declaration takes ownership of the memory associated with the bindings list.
 	 */
-	inline Declaration(DeclarationType type, std::list<Binding*>* bindings = NULL)
-		: Statement(DECLARATION), mType(type) { 
-		if (bindings) mBindings = bindings;
-		else mBindings = new std::list<Binding*>();
+	inline Declaration(
+		DeclarationType type, 
+		Location const& loc, 
+		std::list<Binding<pelem_base_t>*>* bindings = NULL)
+		: Statement<pelem_base_t>(DECLARATION, loc), mType(type) { 
+		if (bindings) mBinderList = bindings;
+		else mBinderList = new std::list<Binding<pelem_base_t>*>();
 	}
 
 	inline ~Declaration() {
@@ -219,8 +225,8 @@ public:
 	 * @brief Adds a binding statement to the declaration.
 	 * @param binding The binding to add to the declaration.
 	 * NOTE:  This object takes ownership of the memory associated with binding.
-	 */a
-	inline void add(Binding* binding) { mBinderList->push_back(binding); }
+	 */
+	inline void add(Binding<pelem_base_t>* binding) { mBinderList->push_back(binding); }
 
 };
 

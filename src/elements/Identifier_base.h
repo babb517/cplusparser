@@ -62,7 +62,7 @@ public:
 	inline Identifier_base(
 			ParseElementType elemType,
 			std::string const& baseName,
-			ParseElementList* params = NULL,
+			std::list<ParseElement_base*>* params = NULL,
 			bool parens = false
 	)
 		: pelem_base_t(elemType, parens), mBaseName(baseName)
@@ -76,10 +76,12 @@ public:
 	inline std::string const& baseName() const 								{ return mBaseName; }
 
 	/// Gets an iterator for the beginning of the parameter list.
-	inline std::list<pelem_base_t*>::const_iterator paramsBegin() const 	{ return mParams.begin(); }
+	inline typename std::list<pelem_base_t*>::const_iterator paramsBegin() const 	
+																			{ return mParams.begin(); }
 
 	/// Gets an iterator for the end of the parameter list.
-	inline std::list<pelem_base_t*>::const_iterator paramsEnd() const 		{ return mParams.end(); }
+	inline typename std::list<pelem_base_t*>::const_iterator paramsEnd() const 		
+																			{ return mParams.end(); }
 
 	/// Gets the number of parameters the element has.
 	inline size_t arity() const												{ return mParams.size(); }
@@ -96,10 +98,12 @@ public:
 protected:
 
 	/// Gets an iterator for the beginning of the parameter list.
-	inline std::list<pelem_base_t*>::iterator paramsBegin() { return mParams.begin(); }
+	inline typename std::list<pelem_base_t*>::iterator paramsBegin() 
+																			{ return mParams.begin(); }
 
 	/// Gets an iterator for the end of the parameter list.
-	inline std::list<pelem_base_t*>::iterator paramsEnd() { return mParams.end(); }
+	inline typename std::list<pelem_base_t*>::iterator paramsEnd() 
+																			{ return mParams.end(); }
 
 };
 

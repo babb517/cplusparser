@@ -39,7 +39,7 @@ public:
 	/* Types */
 	/**********************************************************/
 	/// An iterator for the binder statement.
-	typedef std::list<Identifier_base<pelem_base_t>*>::const_iterator const_iterator;
+	typedef typename std::list<Identifier_base<pelem_base_t>*>::const_iterator const_iterator;
 private:
 	/**********************************************************/
 	/* Members */
@@ -66,7 +66,7 @@ public:
 	/**
 	 * @brief Frees all memory associated with the binder and identifiers list.
 	 */
-	inline ~Binder() {
+	inline ~Binding() {
 		size_t sz = mIds->size();
 		delete mBinder;
 		for (; sz; sz--) { delete mIds.front(); mIds.pop_front(); }

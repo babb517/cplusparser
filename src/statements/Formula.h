@@ -27,6 +27,7 @@
 #include <boost/iterator/iterator_facade.hpp>
 
 #include "statements/Statement.h"
+#include "Location.h"
 
 #include "config.h"		// autoheader header
 
@@ -50,11 +51,12 @@ public:
 	/****************************************************************************/
 	/**
 	 * @brief Initializes the formula
-	 * @param The formula this statement encapsulates.
+	 * @param loc The location of the formula.
+	 * @param formula The formula this statement encapsulates.
 	 * NOTE: This object takes ownership of the memory associated with the provided formula.
 	 */
-	inline Formula(pelem_base_t* formula) 
-		: Statement(FORMULA), mFormula(formula)
+	inline Formula(Location const& loc, pelem_base_t* formula) 
+		: Statement<pelem_base_t>(FORMULA, loc), mFormula(formula)
 	{ /* Intentionally Left Blank */ }
 
 	/**
@@ -69,10 +71,7 @@ public:
 	/* Accessors */
 	/****************************************************************************/
 	/// Accesses the head of the rule.
-	inline pelem_base_t const* head() { return mHead; }
-
-	/// Accesses the body of the rule.
-	inline pelem_base_t const* body() { return mBody; }
+	inline pelem_base_t const* formula() { return mFormula; }
 };
 
 };

@@ -55,7 +55,7 @@ std::ostream& BinaryOperator_base<pelem_base_t>::fullName(std::ostream& out) con
 // Detaches the operator's sub expression, returning it.
 template <typename pelem_base_t>
 pelem_base_t* BinaryOperator_base<pelem_base_t>::detachPostOp() {
-	ParseElement* ret = mPostOp;
+	pelem_base_t* ret = mPostOp;
 	mPostOp = NULL;
 	return ret;
 }
@@ -63,14 +63,14 @@ pelem_base_t* BinaryOperator_base<pelem_base_t>::detachPostOp() {
 // Detaches the operator's sub expression, returning it.
 template <typename pelem_base_t>
 pelem_base_t* BinaryOperator_base<pelem_base_t>::detachPreOp() {
-	ParseElement* ret = mPreOp;
+	pelem_base_t* ret = mPreOp;
 	mPreOp = NULL;
 	return ret;
 }
 
 // Converts an operatory to a string representation.
 template <typename pelem_base_t>
-std::string BinaryOperator_base<pelem_base_t>::opToString(BinaryOperatorType op) {
+std::string BinaryOperator_base<pelem_base_t>::opToString(BinaryOperatorType op) const {
 	std::string opStr;
 	switch(op)
 	{

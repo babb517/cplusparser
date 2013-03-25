@@ -59,7 +59,7 @@ public:
 private:
 	/// A list of the quantifiers present in this grouping, both the kinds
 	/// of quantifiers and references to the quantifying variables.
-	QuantifierList mQuants;
+	QuantifierList* mQuants;
 	pelem_base_t* mPostOp; ///< The bit(s) affected by the quantifier(s).
 
 public:
@@ -70,9 +70,10 @@ public:
 	 * @param postOp The sub expression that occurs after the quantifiers.
 	 * @param parens Whether to encase the expression in parens.
 	 */
-	inline Quantifier_base(QuantifierList const* quants = NULL, pelem_base_t* postOp = NULL, bool parens = false)
+	inline Quantifier_base(QuantifierList* quants = NULL, pelem_base_t* postOp = NULL, bool parens = false)
 		: pelem_base_t(PELEM_QUANT, parens), mPostOp(postOp) {
-		if (quants) mQuants = *quants;
+		if (quants) mQuants = quants;
+		else mQuants = new QuantifierList();
 	}
 
 
@@ -83,22 +84,22 @@ public:
 	virtual pelem_base_t* copy() const;
 
 	/// Gets the begining of the list of quantifiers.
-	inline QuantifierList::const_iterator quantsBegin() const 	{ return mQuants.begin(); }
+	inline typename QuantifierList::const_iterator quantsBegin() const 	{ return mQuants->begin(); }
 
 	/// Gets the end of the list of quantifiers.
-	inline QuantifierList::const_iterator quantsEnd() const 	{ return mQuants.end(); }
+	inline typename QuantifierList::const_iterator quantsEnd() const 	{ return mQuants->end(); }
 
 	/// Gets the number of quantifiers associated with this instance.
-	inline size_t numQuants() const								{ return mQuants.size(); }
+	inline size_t numQuants() const										{ return mQuants->size(); }
 
 	/// Adds a quantifier to the list.
-	inline void addQuant(Quantifier* newQuant)					{ mQuants.push_back(newQuant); }
+	inline void addQuant(Quantifier* newQuant)							{ mQuants->push_back(newQuant); }
 
 	/// Gets the operator's sub expression.
-	inline pelem_base_t const* postOp() const	{ return mPostOp; }
+	inline pelem_base_t const* postOp() const							{ return mPostOp; }
 
 	/// Sets the operator's sub expression, deallocating any existing sub expression.
-	inline void postOp(pelem_base_t* postOp)	{ if (mPostOp) delete mPostOp; mPostOp = postOp; }
+	inline void postOp(pelem_base_t* postOp)							{ if (mPostOp) delete mPostOp; mPostOp = postOp; }
 
 	/// Detaches the operator's sub expression, returning it.
 	pelem_base_t* detachPostOp();
@@ -110,10 +111,10 @@ public:
 
 protected:
 	/// Gets the begining of the list of quantifiers.
-	inline QuantifierList::iterator quantsBegin() 	{ return mQuants.begin(); }
+	inline typename QuantifierList::iterator quantsBegin() 	{ return mQuants->begin(); }
 
 	/// Gets the end of the list of quantifiers.
-	inline QuantifierList::iterator quantsEnd() 	{ return mQuants.end(); }
+	inline typename QuantifierList::iterator quantsEnd() 	{ return mQuants->end(); }
 };
 
 }; /* end namespce cplus_parser */

@@ -48,7 +48,7 @@ class BinaryWrapper_base : public pelem_base_t {
 
 private:
 	BinaryOperator_base<pelem_base_t> const* mWrapped;
-	BinaryOperator_base::BinaryOperatorType mType;
+	typename BinaryOperator_base<pelem_base_t>::BinaryOperatorType mType;
 	bool mForceParens;
 public:
 
@@ -60,7 +60,7 @@ public:
 	 */
 	inline BinaryWrapper_base(
 			BinaryOperator_base<pelem_base_t> const* wrappedExpr,
-			BinaryOperator_base::BinaryOperatorType type,
+			typename BinaryOperator_base<pelem_base_t>::BinaryOperatorType type,
 			bool forceParens = false
 	)
 		: pelem_base_t(wrappedExpr->getType(), wrappedExpr->parens()), mWrapped(wrappedExpr), mType(type), mForceParens(forceParens)
@@ -68,13 +68,13 @@ public:
 
 	inline virtual std::ostream& fullName(std::ostream& out) const
 																{ return mWrapped->fullName(out); }
-	inline virtual pelem_base_t* copy() const					{ return new SimpleBinaryOperatorWrapper<pelem_base_t>(mWrapped, mType, mForceParens); }
+	inline virtual pelem_base_t* copy() const					{ return new BinaryWrapper_base<pelem_base_t>(mWrapped, mType, mForceParens); }
 
 	/// Gets the operator's type.
-	inline BinaryOperator_base::BinaryOperatorType opType() const 	{ return mType; }
+	inline typename BinaryOperator_base<pelem_base_t>::BinaryOperatorType opType() const 	{ return mType; }
 
 	/// Sets the operator's type.
-	inline void opType(BinaryOperator_base::BinaryOperatorType op) { mType = op; }
+	inline void opType(typename BinaryOperator_base<pelem_base_t>::BinaryOperatorType op) { mType = op; }
 
 
 	/// Gets the operator's sub expression.

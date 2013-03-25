@@ -28,11 +28,11 @@
 #include <boost/type_traits/is_base_of.hpp>
 #include <boost/static_assert.hpp>
 
+#include "Location.h"
 #include "elements/ParseElement_base.h"
 #include "parser_types.h"
 #include "statements/Statement.h"
 
-#include "config.h" // autotools header.
 
 #define CPLUS_PARSER_HANDLER_MSG_LEVEL_MASK			0xFFFF0000
 #define CPLUS_PARSER_HANDLER_MSG_ERR_CODE_MASK		0x0000FFFF
@@ -41,16 +41,10 @@
 namespace cplus_parser {
 
 /**
- * An interface class used to handle the creation of the various parser constructs.
- * @type pelem_base_t The base parse element type that all elements should inherit from. Must be derived from ParseElement_base.
+ * @brief An interface class used to handle the upward mobility of messages.
  */
-template<typename pelem_base_t>
-class Handler {
-
-	BOOST_STATIC_ASSERT_MSG(
-		(boost::is_base_of<ParseElement_base, pelem_base_t>::value),
-		"pelem_base_t must be a descendant of ParseElement_base"
-	);
+class MessageHandler
+{
 public:
 	/*******************************************************************************************/
 	/* Types */
@@ -75,7 +69,7 @@ public:
 	 * @param level The level that is used to determine whether the message should be suppressed.
 	 * @param code The error code associated with the message. 
 	 */
-	static inline MessageFlag msgflag(uint16_t level, uint16_t code = 0) { return ((MessageFlag)(x << 16)) | ((MessageFlag)uintcode); }
+	static inline MessageFlag msgflag(uint16_t level, uint16_t code = 0) { return ((MessageFlag)(level << 16)) | ((MessageFlag)code); }
 
 	/**
 	 * @brief Extracts the message level from the message flag.
@@ -90,6 +84,46 @@ public:
 	 * @return The error code stored within the message flag.
 	 */
 	static inline uint16_t msgcode(MessageFlag flag) { return (uint16_t)(CPLUS_PARSER_HANDLER_MSG_ERR_CODE_MASK & flag); }
+
+	/*******************************************************************************************/
+	/* Interface Methods */
+	/*******************************************************************************************/
+
+	/**
+	 * @brief Attempts to display a message to the user, assuming that the message is above the masked level.
+	 * @param flags The message flags. Includes teh message level as well as (possibly) a message error code.
+	 * @param msg The message format string (see printf).
+	 * @param ... The arguments for the format string (see printf).
+	 * @return True if the message was displayed, false otherwise.
+	 */
+	virtual bool message(MessageFlag flags, char const* msg, ...) = 0;
+
+	/**
+	 * @brief Attempts to display a message to the user, assuming that the message is above the masked level.
+	 * @param flags The message flags. Includes teh message level as well as (possibly) a message error code.
+	 * @param loc The location that the error pertains to.
+	 * @param msg The message format string (see printf).
+	 * @param ... The arguments for the format string (see printf).
+	 * @return True if the message was displayed, false otherwise.
+	 */
+	virtual bool message(Location const& loc, MessageFlag flags, char const* msg, ...) = 0;
+
+};
+
+
+/**
+ * An interface class used to handle the creation of the various parser constructs.
+ * @type pelem_base_t The base parse element type that all elements should inherit from. Must be derived from ParseElement_base.
+ */
+template<typename pelem_base_t>
+class StatementHandler 
+{
+
+	BOOST_STATIC_ASSERT_MSG(
+		(boost::is_base_of<ParseElement_base, pelem_base_t>::value),
+		"pelem_base_t must be a descendant of ParseElement_base"
+	);
+public:
 
 
 	/*******************************************************************************************/
@@ -112,17 +146,6 @@ public:
 	 * @return True if the statement has been accepted, false to throw a parse error.
 	 */
 	virtual bool process(Statement<pelem_base_t>* stmt) = 0;
-
-	/**
-	 * @brief Attempts to display a message to the user, assuming that the message is above the masked level.
-	 * @param flags The message flags. Includes teh message level as well as (possibly) a message error code.
-	 * @param msg The message format string (see printf).
-	 * @param ... The arguments for the format string (see printf).
-	 * @return True if the message was displayed, false otherwise.
-	 */
-	explicit virtual bool message(MessageFlag flags, char const* msg, ...) = 0;
-
-
 
 };
 

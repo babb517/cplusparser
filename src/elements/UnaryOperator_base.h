@@ -71,13 +71,13 @@ public:
 	 * @param postOp the subexpression which occurs after the operator.
 	 * @param parens Whether to add parens around the element.
 	 */
-	inline UnaryOperator_base(UnaryOperatorType opType, T* postOp, bool parens = false)
+	inline UnaryOperator_base(UnaryOperatorType opType, pelem_base_t* postOp, bool parens = false)
 		: pelem_base_t(PELEM_UOP, parens), mOpType(opType), mPostOp(postOp)
 	{ /* IntentionallY Left Blank */ }
 
 	// inherited stuffs
 	virtual std::ostream& fullName(std::ostream& out) const;
-	inline virtual pelem_base_t* copy() const 			{ return new UnaryOperator_base<pelem_base_t>(opType(), postOp()->copy(), parens()); }
+	inline virtual pelem_base_t* copy() const 			{ return new UnaryOperator_base<pelem_base_t>(opType(), postOp()->copy(), pelem_base_t::parens()); }
 
 	/// Gets the operator's type.
 	inline UnaryOperatorType opType() const 			{ return mOpType; }

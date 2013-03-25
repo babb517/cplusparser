@@ -62,9 +62,6 @@ public:
 		* @brief The type to use as the character type.
 		*/
 	typedef char char_type;
-	
-
-
 
 	/**
 		* @brief The definition of exactly what this device is capable of.
@@ -98,7 +95,6 @@ private:
 		char* buf;								///< A buffer used to store data that has be put back into the stream.
 		size_t bufsize;							///< The size of buf.
 		size_t bufpos;							///< The position that we're at within buf.
-		size_t locignore;						///< The number of characters (if any) that have been put into the buffer that should be ignored for position tracking purposes.
 
 		std::ifstream* source;					///< The source used to read from, or null if we don't have a stream open.
 
@@ -106,9 +102,8 @@ private:
 		 * @brief Initializes the context, allocated a buffer if a non-zero buffer size was specified.
 		 */
 		inline FileContext(std::string const& _file, std::ifstream* _source, size_t _bufsize, TagArgs... _args)
-			: file(_file), tag(_args), buf(NULL), bufsize(_bufsize), bufpos(0), locignore(0), source(_source)
+			: file(_file), tag(_args...), buf(NULL), bufsize(_bufsize), bufpos(0), source(_source)
 			{ if (bufsize) buf = new char[bufsize]; }
-
 
 		/**
 		 * @brief Deallocated the buffer, closes, and deallocates the source.
@@ -122,13 +117,15 @@ private:
 	/* Members */
 	/***********************************************************************/
 	std::list<FileContext*> mStack;			///< The stack of files we are currently reading through.
-	std::list<FileContext*> mComplete;					///< A location used to keep track of the completed files.
 
 	std::locale mLocale;					///< Our current locale. Used to propogate to each source.
 	FileState mState;						///< The current state of the stream.
 	bool mAutoAdvance;						///< Whether we should automatically advance files when we reach the end of one.
 
 public:
+	/// The stream type encapsulating the compound file source.
+	typedef boost::iostreams::stream<CompoundFileSource<tag_t,TagArgs... > > Stream;
+
 	/***********************************************************************/
 	/* Constructors / Destructors */
 	/***********************************************************************/
@@ -154,14 +151,14 @@ public:
 	 * @param file The file to add.
 	 * @param args The arguments used to initialize the tag.
 	 */
-	inline bool append(std::string const& file, TagArgs... args) { return place(file, args, false); }
+	inline bool append(std::string const& file, TagArgs... args) { return place(file, false, args...); }
 
 	/**
 	 * @brief adds the specified file to the current location in the effective input stream.
 	 * @param file The file to add.
 	 * @param args The arguments used to initialize the tag.
 	 */
-	inline bool insert(std::string const& file, TagArgs... args) { return place(file, args, true); }
+	inline bool insert(std::string const& file, TagArgs... args) { return place(file, false, args...); }
 
 	/**
 	 * @brief Attempts to move to the next file in the stream.
@@ -272,15 +269,9 @@ private:
 	 * @param args The arguments used to initialize the file's tag.
 	 * @param top Whether the file should be placed at the top of the stack, or the bottom.
 	 */
-	bool place(std::string const& file, TagArgs... args, bool top);
+	bool place(std::string const& file, bool top, TagArgs... args);
 
 };
-
-/**
- * @brief A stream wrapper for working with multiple concurrent source files.
- */
-template <typename tag_t, typename... TagArgs>
-class CompoundFileStream : public boost::iostreams::stream<CompoundFileSource<tag_t,TagArgs> > { }
 
 };}; /* end namespace cplus_parser::details */
 

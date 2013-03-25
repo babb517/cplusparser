@@ -21,9 +21,24 @@
  */
 
 #pragma once
+
+#include<string>
+
 #include "config.h"		// autoheader header
 
 namespace cplus_parser {
+
+/// The possible types of a ParseElement instance.
+typedef enum {
+	PELEM_PELEM,
+	PELEM_UOP,
+	PELEM_BOP,
+	PELEM_QUANT,
+	PELEM_BASELIKE,
+	PELEM_CONSTLIKE,
+	PELEM_OBJLIKE,
+	PELEM_VARLIKE
+} ParseElementType;
 
 /**
  * General parent of all self-contained, self-translating parse tree elements.
@@ -32,17 +47,6 @@ class ParseElement_base
 {
 public:
 
-	/// The possible types of a ParseElement instance.
-	typedef enum {
-		PELEM_PELEM,
-		PELEM_UOP,
-		PELEM_BOP,
-		PELEM_QUANT,
-		PELEM_BASELIKE,
-		PELEM_CONSTLIKE,
-		PELEM_OBJLIKE,
-		PELEM_VARLIKE
-	} ParseElementType;
 
 private:
 

@@ -34,6 +34,7 @@
 #include <boost/iostreams/device/file.hpp>
 
 #include "details/CompoundFileStream.h"
+#include "utils/utils.h"
 
 namespace cplus_parser {
 namespace details {
@@ -44,29 +45,13 @@ namespace details {
  */
 #define BUFFER_BLOCK_SIZE 1024
 
-
-/**
- * @brief Copies the contents of one array to the other in reverse order.
- * @param[out] dest The destination array.
- * @param src The source array.
- * @param n The number of character to copy.
- */
-void reverse_copy(char *dest, char const*src, std::streamsize n) {
-		size_t max_i = n-1;
-
-		for (size_t i = 0; i < n; i++) {
-			dest[max_i - i] = src[i];
-		}
-}
-
-
 /*****************************************************************************************/
 /* File Context */
 /*****************************************************************************************/
 
 /// Free the context
 template <typename tag_t, typename... TagArgs>
-CompoundFileSource::FileContext::~FileContext() {
+CompoundFileSource<tag_t, TagArgs...>::FileContext::~FileContext() {
 	if (buf) delete buf;
 	if (source) {
 		if (source->is_open()) source->close();
@@ -80,34 +65,24 @@ CompoundFileSource::FileContext::~FileContext() {
 
 // Constructor
 template <typename tag_t, typename... TagArgs>
-CompoundFileSource::CompoundFileSource(bool autoAdvance) {
+CompoundFileSource<tag_t, TagArgs...>::CompoundFileSource(bool autoAdvance) {
 	mAutoAdvance = autoAdvance;
 	state(CLOSED);
 }
 
 template <typename tag_t, typename... TagArgs>
-CompoundFileSource::~CompoundFileSource() { 
-	for (size_t sz = mStack.size(); sz; sz--) {
-		delete mStack.front();
-		mStack.pop_front();
-	}
-
-	for (size_t sz = mComplete.size(); sz; sz--) {
-		delete mComplete.front();
-		mComplete.pop_front();
-	}
-
+CompoundFileSource<tag_t, TagArgs...>::~CompoundFileSource() { 
 	if (state() != CLOSED) close(); 
 };
 
 // Place a file on the stack.
 template <typename tag_t, typename... TagArgs>
-bool CompoundFileSource::place(std::string const& file, TagArgs... args, bool top) {
+bool CompoundFileSource<tag_t, TagArgs...>::place(std::string const& file, bool top, TagArgs... args) {
 	// State handling...
 	if (state() == ERROR) return false;
 
 	// initialize the new context
-	FileContext* context = new FileContext(file, NULL, 0, args);
+	FileContext* context = new FileContext(file, NULL, 0, args...);
 
 	// Step 1) Validate the name..
 	//if (!boost::filesystem::native(filename)) {
@@ -159,16 +134,15 @@ bool CompoundFileSource::place(std::string const& file, TagArgs... args, bool to
 
 // Pops the top file context off the stack.
 template <typename tag_t, typename... TagArgs>
-bool CompoundFileSource::nextFile() {
+bool CompoundFileSource<tag_t, TagArgs...>::nextFile() {
 	if (state() == ERROR) return false;
 
 	size_t size = mStack.size();
 
 	
 	// pop off the old state.
-	// keep it around for a little while though.
 	if (size) {
-		mComplete.push_back(mStack.front());
+		delete mStack.front();
 		mStack.pop_front();
 	}
 
@@ -181,7 +155,7 @@ bool CompoundFileSource::nextFile() {
 }
 
 template <typename tag_t, typename... TagArgs>
-void CompoundFileSource::reset() {
+void CompoundFileSource<tag_t, TagArgs...>::reset() {
 	if (source()) {
 		source()->clear();
 		if (state() == ERROR) state(GOOD);
@@ -192,14 +166,19 @@ void CompoundFileSource::reset() {
 
 // Closes the stream, freeing all available resourced.
 template <typename tag_t, typename... TagArgs>
-void CompoundFileSource::close() {
+void CompoundFileSource<tag_t, TagArgs...>::close() {
+	for (size_t sz = mStack.size(); sz; sz--) {
+		delete mStack.front();
+		mStack.pop_front();
+	}
+
 	mStack.clear();
 	state(CLOSED);
 }
 
 // Places a number of buffered characters into the input stream to be reread later.
 template <typename tag_t, typename... TagArgs>
-bool CompoundFileSource::putback(char const* c, std::streamsize n) {
+bool CompoundFileSource<tag_t, TagArgs...>::putback(char const* c, std::streamsize n) {
 	FileContext* context;
 	std::streamsize newpos;
 
@@ -221,7 +200,7 @@ bool CompoundFileSource::putback(char const* c, std::streamsize n) {
 		// Copy the contents...
 		// Note that this should be done in reverse order, so the last
 		// part of the buffer comes out first.
-		reverse_copy(context->buf + context->bufpos, c, n);
+		utils::reverse_copy(context->buf + context->bufpos, c, n);
 
 		context->bufpos = (size_t)newpos;
 
@@ -238,18 +217,18 @@ bool CompoundFileSource::putback(char const* c, std::streamsize n) {
 
 // Imbues the steam with a provided locality for locality sensitive operations.
 template <typename tag_t, typename... TagArgs>
-void CompoundFileSource::imbue(std::locale const& loc) {
+void CompoundFileSource<tag_t, TagArgs...>::imbue(std::locale const& loc) {
 	mLocale = loc;
 
 	// Propogate the changes to each of the open streams.
-	for (std::list<FileContext>::iterator it = mStack.begin(); it != mStack.end(); it++) {
-		if (it->source) (*it)->source->imbue(mLocale);
+	for (typename std::list<FileContext*>::iterator it = mStack.begin(); it != mStack.end(); it++) {
+		if ((*it)->source) (*it)->source->imbue(mLocale);
 	}
 }
 
 // Reads from any open files
 template <typename tag_t, typename... TagArgs>
-std::streamsize CompoundFileSource::read(char* c, std::streamsize n) {
+std::streamsize CompoundFileSource<tag_t, TagArgs...>::read(char* c, std::streamsize n) {
 	std::streamsize needed = n;
 
 	// If we've already hit the end, make sure to tell them.
@@ -266,7 +245,7 @@ std::streamsize CompoundFileSource::read(char* c, std::streamsize n) {
 		if (context->bufpos) {
 			// we have something...
 			size = (context->bufpos  > needed) ? needed : context->bufpos;
-			reverse_copy(context->buf + context->bufpos - 1,c, (size_t)size);
+			utils::reverse_copy(context->buf + context->bufpos - 1,c, (size_t)size);
 			c += size;
 			needed -= size;
 			context->bufpos -= (size_t)size;

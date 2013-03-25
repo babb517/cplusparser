@@ -31,6 +31,7 @@
 #include "config.h"		// autoheader header
 
 #include "elements/Binder.h"
+#include "elements/Binding.h"
 #include "elements/Identifier_base.h"
 
 namespace cplus_parser {
@@ -41,9 +42,11 @@ namespace cplus_parser {
 
 // initialize and point to provided position
 template <typename pelem_base_t>
-Declaration<pelem_base_t>::const_iterator::const_iterator(std::list<Binding*>::const_iterator const& outer, 
-			Binding::const_iterator const& inner,
-			std::list<Binding*>::const_iterator const& outerBound) {
+Declaration<pelem_base_t>::const_iterator::const_iterator(
+			typename std::list<Binding<pelem_base_t>*>::const_iterator const& outer, 
+			typename Binding<pelem_base_t*>::const_iterator const& inner,
+			typename std::list<Binding<pelem_base_t>*>::const_iterator const& outerBound)
+{
 	mSet = false;
 	mOuterIt = outer;
 	mInnerIt = inner;
@@ -56,25 +59,23 @@ Declaration<pelem_base_t>::const_iterator::const_iterator(const_iterator const& 
 	mSet = false;
 	mOuterIt = other.mOuterIt;
 	mOuterEnd = other.mOuterEnd;
-	mInnerIt = other.mInnerIt;
 }
 
 // Move to the next position.
 template <typename pelem_base_t>
 void Declaration<pelem_base_t>::const_iterator::increment() {
 	mSet = false;
-	if (mOuterIt != mOuterEnd)
+	if (mOuterIt != mOuterEnd) {
 		if (++mInnerIt == mOuterIt->identifiers.end()) {
 			if (++mOuterIt != mOuterEnd) mInnerIt = mOuterIt->identifier.begin();
 		}
 	}
-
 }
 
 // Updates the internal working space of the iterator.
 template <typename pelem_base_t>
 void Declaration<pelem_base_t>::const_iterator::set() {
-	if (mInnerIt != mInnerEnd && mOuterIt != mOuterEnd) {
+	if (mOuterIt != mOuterEnd && mInnerIt != mOuterIt->identifiers.end()) {
 		mTempRef.binder = mOuterIt->binder;
 		mTempRef.identifier = *mInnerIt;
 	} else {

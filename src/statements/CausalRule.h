@@ -26,7 +26,8 @@
 #include <boost/static_assert.hpp>
 #include <boost/iterator/iterator_facade.hpp>
 
-#include <statements/Statement.h>
+#include "statements/Statement.h"
+#include "Location.h"
 
 #include "config.h"		// autoheader header
 
@@ -54,8 +55,8 @@ public:
 	 * @param head The head of the rule.
 	 * @param body The body of the rule.
 	 */
-	inline CausalRule(pelem_base_t* head, pelem_base_t* body) 
-		: Statement(RULE_CAUSAL), mHead(head), mBody(body)
+	inline CausalRule(Location const& loc, pelem_base_t* head, pelem_base_t* body) 
+		: Statement<pelem_base_t>(RULE_CAUSAL, loc), mHead(head), mBody(body)
 	{ /* Intentionally Left Blank */ }
 
 	/****************************************************************************/
