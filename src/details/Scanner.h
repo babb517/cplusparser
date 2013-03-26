@@ -27,14 +27,14 @@
 #include <sstream>
 
 #include "details/CompoundFileStream.h"
+#include "details/Token.h"
 
 namespace cplus_parser {
 
 class MessageHandler;
+class Location;
 
 namespace details {
-
-class Token;
 
 class Scanner
 {
@@ -56,17 +56,19 @@ public:
 		size_t pos;							///< Current position in the file.
 		size_t line;						///< Current line in the file.
 		size_t col;							///< Current column in the file.
-		size_t noloc;						///< The number of characters to ignore for position purposes.
+		Location* loc;						///< When specified indicates that all tokens in the file should be tagged with this location data.
 
 		/**
 		 * @brief Initiliazes the descriptor.
+		 * @param _name The name of the file.
+		 * @param _loc An optional fixed location for each of the tokens in the file.
 		 */
-		inline FileDescriptor(std::string const* _name)
-			: name(_name), pos(0), line(1), col(1), noloc(0)
+		inline FileDescriptor(std::string const* _name, Location* _loc = NULL)
+			: name(_name), pos(0), line(1), col(1), loc(_loc)
 		{ /* Intentionally Left Blank */ }
 
-		/// Frees the read buffer
-		inline ~FileDescriptor() { /* Intentionally left blank */ }
+		/// Frees the location.
+		inline ~FileDescriptor() { if (loc) delete loc; }
 
 	};
 
@@ -92,12 +94,13 @@ private:
 	
 	CompoundFileSource<
 		FileDescriptor, 
-		std::string const*>::Stream mInput;			///< A unified input stream to tokenize.
+		std::string const*,
+		Location*>::Stream mInput;		///< A unified input stream to tokenize.
 
-	std::list<std::string> mNames;					///< The names of the files we're working with.
+	std::list<std::string> mNames;		///< The names of the files we're working with.
 	
 
-	MessageHandler* mHandler;						///< A handler used to support upwardly mobile messages.
+	MessageHandler* mHandler;			///< A handler used to support upwardly mobile messages.
 
 	// re2c context
 	YYCONDTYPE mCondition;				///< The current condition of the lexxer.
@@ -107,6 +110,8 @@ private:
 	char* mLimit;						///< The position just after the last filled position in the buffer.
 	char* mMarker;						///< The (temporary) position of RE2C.
 	char* mBufEnd;						///< The position just after the last one in the buffer.
+	char* mLastnl;						///< A pointer to the last newline encountered by the scanner.
+	FileDescriptor* mTag;
 
 public:
 	/************************************************************************/
@@ -120,7 +125,9 @@ public:
 		mCursor = mBuffer;
 		mBegin = mBuffer;
 		mLimit = mBuffer;
+		mLastnl = mBuffer;
 		mBufEnd = mBuffer + BUFFER_SIZE;
+		mTag = NULL;
 	}
 
 	/************************************************************************/
@@ -129,9 +136,9 @@ public:
 	/**
 	 * @brief Analyzes the input stream and returns the next token.
 	 * @param[out] token The token that was read in.
-	 * @return True if successful, false otherwise.
+	 * @return The type of token found.
 	 */
-	bool lex(Token& token);
+	TokenType lex(Token& token);
 
 	/**
 	 * @brief Appends a file to the end of the input stream.
@@ -152,10 +159,9 @@ public:
 	/**
 	 * @brief Injects a string at the input streams current location to be read next.
 	 * @param str The string to inject.
-	 * @param noloc Whether we should ignore the the injected characters when determining token location.
-	 * NOTE: This action is not supported 
+	 * @param loc The location to display for all tokens injected this way.
 	 */
-	bool inject(std::string const& str, bool noloc = true);
+	bool inject(std::string const& str, Location const& loc);
 
 private:
 	/************************************************************************/
@@ -191,11 +197,24 @@ private:
 	 */
 	void fill(size_t len); 
 
-	/// sets the current condition
-	inline void condition(YYCONDTYPE condition) { mCondition = condition; }
-
-	/// Gets the current condition
+	/// Gets the current conditio
 	inline YYCONDTYPE condition() const			{ return mCondition; }
+	
+	/// sets the current condition
+	inline void condition(YYCONDTYPE cond) { 
+		mCondition = cond; 
+
+#ifdef DEBUG
+		handler()->message(
+			MessageHandler::msgflag(MessageHandler::MSG_DEBUG_SCANNER_VERBOSE, 0),
+			"Entering scanner condition: '%s'", conditionToString(cond)); 	
+#endif
+	}
+
+
+
+	/// Gets a string representation of the condition.
+	char const* conditionToString(YYCONDTYPE cond);
 
 	/// Moves to the next file in the list.
 	void advance();

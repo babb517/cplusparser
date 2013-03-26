@@ -22,14 +22,8 @@
 
 #pragma once
 
-#include <boost/iostreams/concepts.hpp>
-#include <boost/iostreams/categories.hpp>
-#include <boost/filesystem/fstream.hpp>
-#include <boost/iostreams/stream.hpp>
-
+#include <iostream>
 #include <string>
-#include <list>
-
 
 namespace cplus_parser {
 
@@ -90,6 +84,11 @@ public:
 	/// increments the ending column by \a n.
 	inline void col(size_t n) { end_col += n; }
 
+	/// Constructs a standardized string representation of this location.
+	std::string str() const;
+
+	/// Outputs a string representation of this location to the provided output stream.
+	std::ostream& output(std::ostream& out) const;
 };
 
 

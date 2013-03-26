@@ -110,6 +110,8 @@ private:
 		 */
 		~FileContext();
 
+		/// Places a number of buffered characters into this file's input buffer for later.
+		void put(char const* c, std::streamsize n);
 	};
 
 
@@ -158,7 +160,18 @@ public:
 	 * @param file The file to add.
 	 * @param args The arguments used to initialize the tag.
 	 */
-	inline bool insert(std::string const& file, TagArgs... args) { return place(file, false, args...); }
+	inline bool insert(std::string const& file, TagArgs... args) { return place(file, true, args...); }
+
+	/**
+	 * Injects the provided input data into the read stream at either the current location or the end.
+	 * @param data A buffer containing the data to inject.
+	 * @param n The number of bytes to inject.
+	 * @param here Whether the data should be injected here or at the end.
+	 * @param args The arguments used to initialize the tag.
+	 * @return True if succesful, false otherwise.
+	 */
+	bool inject(char const* data, size_t n,bool here, TagArgs... args);
+
 
 	/**
 	 * @brief Attempts to move to the next file in the stream.

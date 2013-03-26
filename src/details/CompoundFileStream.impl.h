@@ -52,11 +52,33 @@ namespace details {
 /// Free the context
 template <typename tag_t, typename... TagArgs>
 CompoundFileSource<tag_t, TagArgs...>::FileContext::~FileContext() {
-	if (buf) delete buf;
+	if (buf) free(buf);
 	if (source) {
 		if (source->is_open()) source->close();
 		delete source;
 	}
+}
+
+
+// Places a number of buffered characters into this file's input buffer for later.
+template <typename tag_t, typename... TagArgs>
+void CompoundFileSource<tag_t, TagArgs...>::FileContext::put(char const* c, std::streamsize n) {
+	std::streamsize newpos;
+
+	newpos = bufpos + n;
+
+	if (newpos >= bufsize) {
+		// Overflow, expand the buffer.
+		bufsize = (size_t)(((newpos + 1) / BUFFER_BLOCK_SIZE) + 1) * BUFFER_BLOCK_SIZE;
+		buf = (char*)realloc(buf, bufsize);
+	}
+
+	// Copy the contents...
+	// Note that this should be done in reverse order, so the last
+	// part of the buffer comes out first.
+	utils::reverse_copy(buf + bufpos, c, n);
+
+	bufpos = (size_t)newpos;
 }
 
 /******************************************************************************************/
@@ -74,6 +96,28 @@ template <typename tag_t, typename... TagArgs>
 CompoundFileSource<tag_t, TagArgs...>::~CompoundFileSource() { 
 	if (state() != CLOSED) close(); 
 };
+
+
+
+// Injects the provided input data into the read stream at either the current location or the end.
+template <typename tag_t, typename... TagArgs>
+bool CompoundFileSource<tag_t, TagArgs...>::inject(char const* data, size_t n,bool here, TagArgs... args) {
+	if (state() == ERROR) return false;
+	
+	FileContext* context = new FileContext("<INJECTED TEXT>", NULL, 0, args...);
+
+	context->put(data, n);
+
+	if (here)
+		mStack.push_front(context);
+	else
+		mStack.push_back(context);	
+
+
+	state(GOOD);
+	return true;
+}
+
 
 // Place a file on the stack.
 template <typename tag_t, typename... TagArgs>
@@ -179,31 +223,11 @@ void CompoundFileSource<tag_t, TagArgs...>::close() {
 // Places a number of buffered characters into the input stream to be reread later.
 template <typename tag_t, typename... TagArgs>
 bool CompoundFileSource<tag_t, TagArgs...>::putback(char const* c, std::streamsize n) {
-	FileContext* context;
-	std::streamsize newpos;
-
 	switch (state()) {
 	case END:
 	case END_OF_FILE:
 	case GOOD:
-		// We should have the last file that we read from
-		// at the top of stack, so let's add it to the buffer
-		context = mStack.front();
-		newpos = context->bufpos + n;
-
-		if (newpos >= context->bufsize) {
-			// Overflow, expand the buffer.
-			context->bufsize = (size_t)(((newpos + 1) / BUFFER_BLOCK_SIZE) + 1) * BUFFER_BLOCK_SIZE;
-			context->buf = (char*)realloc(context->buf, context->bufsize);
-		}
-
-		// Copy the contents...
-		// Note that this should be done in reverse order, so the last
-		// part of the buffer comes out first.
-		utils::reverse_copy(context->buf + context->bufpos, c, n);
-
-		context->bufpos = (size_t)newpos;
-
+		mStack.front()->put(c, n);
 		return true;
 
 	case ERROR:
@@ -245,7 +269,7 @@ std::streamsize CompoundFileSource<tag_t, TagArgs...>::read(char* c, std::stream
 		if (context->bufpos) {
 			// we have something...
 			size = (context->bufpos  > needed) ? needed : context->bufpos;
-			utils::reverse_copy(context->buf + context->bufpos - 1,c, (size_t)size);
+			utils::reverse_copy(c, context->buf + context->bufpos - size, size);
 			c += size;
 			needed -= size;
 			context->bufpos -= (size_t)size;
@@ -253,21 +277,27 @@ std::streamsize CompoundFileSource<tag_t, TagArgs...>::read(char* c, std::stream
 
 		// now try the device...
 		if (needed) {
-			context->source->read(c, needed);
-			if (context->source->eof()) {
-				// We've read the entire file.
-				needed -= context->source->gcount();
-				c += context->source->gcount();
+			if (context->source) {
+				context->source->read(c, needed);
+				if (context->source->eof()) {
+					// We've read the entire file.
+					needed -= context->source->gcount();
+					c += context->source->gcount();
 
-				// Flag that we've reached the end of the file or continue to the next file.
+					// Flag that we've reached the end of the file or continue to the next file.
+					if (autoAdvance()) nextFile();
+					else state(END_OF_FILE);
+				} else if (context->source->fail()) {
+					// Something just went horribly wrong...
+					state(ERROR);
+				} else {
+					// Everything is a-ok and we have everything we need!
+					needed = 0;
+				}
+			} else {
+				// It looks like this was a psuedo file. Just pop it off.
 				if (autoAdvance()) nextFile();
 				else state(END_OF_FILE);
-			} else if (context->source->fail()) {
-				// Something just went horribly wrong...
-				state(ERROR);
-			} else {
-				// Everything is a-ok and we have everything we need!
-				needed = 0;
 			}
 		}
 	}

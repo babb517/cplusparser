@@ -37,7 +37,11 @@ namespace details {
 
 /// A list of the various types of tokens we can receive.
 enum TokenType {
-	T_INTEGER,				// Any positive integer.
+	T_EOF = -2,				// End of File
+	T_ERR = -1,				// unrecognized token.
+
+	T_INTEGER,				// Any integer.
+	T_DECIMAL,				// Any decimal number.	
 	T_IDENTIFIER,			// Any identifier starting with a letter or
 							// with underscore(s) and a letter/number, & optionally
 							// followed by letters/numbers/underscores,
@@ -143,9 +147,12 @@ enum TokenType {
 	T_POUND,				// #
 	T_UMINUS,				// Pseudo-token,, unary, minus
 
+	T_DEBUG_INSERT,			// DEBUG only token used to forcefully insert a file.
+	T_DEBUG_APPEND,			// DEBUG only token used to forcefully append a file.
+	T_DEBUG_INJECT,			// DEBUG only token used to forcefully inject a string.
 
-	T_EOF = -1,				// End of File
-	T_ERR = -2				// unrecognized token.
+
+
 };
 
 class Token {
@@ -192,6 +199,7 @@ public:
 
 	/// Gets the token location.
 	inline Location const& loc() const { return mLoc; }
+	inline Location & loc() { return mLoc; }
 
 	/// Gets the token's data
 	inline std::string* data() { return mData; }

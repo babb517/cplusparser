@@ -1,3 +1,4 @@
+
 /*
  * Copyright (c) 2010-2013 <Joseph Babb, Michael Cassollary, Joohyung Lee>
  *
@@ -33,41 +34,67 @@ namespace cplus_parser {
 namespace details {
 
 #define ACTION_MATCH()												\
-	if (mCursor - lastnl > _tag->noloc)								\
-		_tag->col = mCursor - lastnl;
+	if (mTag) UPDATE_COL();
+
+
+#define UPDATE_COL()												\
+		mTag->col = mCursor - mLastnl;						
 		
 #define ACTION_BEGIN_TOK()											\
-	mBegin = mCursor;
+	ACTION_BEGIN_TOK_OFFSET(0);
+
+// NOTE: Offset should not be used to move across lines.
+#define ACTION_BEGIN_TOK_OFFSET(offset)								\
+	mBegin = mCursor + offset;										\
+	if (mTag->loc)													\
+		token.loc() = *mTag->loc;									\
+	else															\
+		token.loc_init(mTag->name, mTag->line, mTag->col+offset);
 
 #define ACTION_NEWLINE()											\
-	if (!_tag->noloc) {												\
-		_tag->line++;												\
-		_tag->col = 1;												\
-		lastnl = mCursor - 1;										\
+	mTag->line++;													\
+	mTag->col = 1;													\
+	mLastnl = mCursor - 1;											
+
+#define ACTION_EOF()												\
+	if (mTag) { 													\
+		ACTION_BEGIN_TOK(); 										\
 	} else {														\
-		_tag->noloc -= mCursor - lastnl;							\
-		if (_tag->noloc < 0) _tag->noloc = 0;						\
+		token.init(T_EOF, NULL);									\
+		return T_EOF; 												\
 	}
 
 #define INIT_STR_TOK(x)												\
-	token.init(x, new std::string(mBegin, (size_t)(mCursor - mBegin - 1)));
+	INIT_STR_TOK_OFFSET(x,0,0)
+
+#define INIT_STR_TOK_OFFSET(x,offset0,offset1)						\
+	token.init(x, new std::string(mBegin + offset0, 				\
+		(size_t)(mCursor - mBegin - offset0 - offset1))); 			\
+	if (mTag->loc)													\
+		token.loc() = *mTag->loc;									\
+	else															\
+		token.loc_end(mTag->name, mTag->line, mTag->col - 1);			
 
 #define INIT_STR_TOK_STR(x,str)										\
 	token.init(x, new std::string(str));							\
-	token.loc_end(_tag->name, _tag->line, _tag->col)
+	if (mTag->loc)													\
+		token.loc() = *mTag->loc;									\
+	else															\
+		token.loc_end(mTag->name, mTag->line, mTag->col - 1);			
 
-#define INIT_STR_TOK_OFFSET(x,offset0,offset1)						\
-	token.init(x, new std::string(mBegin + offset0, (size_t)(mCursor - mBegin - 1 - offset0 - offset1)))
 
 #define INIT_VOID_TOK(x)											\
 	token.init(x, NULL);											\
-	token.loc_end(_tag->name, _tag->line, _tag->col)
+	if (mTag->loc)													\
+		token.loc() = *mTag->loc;									\
+	else															\
+		token.loc_end(mTag->name, mTag->line, mTag->col - 1);
 
 #define ERROR(msg)													\
 	handler()->message(												\
-		token.loc(),												\
 		MessageHandler::msgflag(MessageHandler::MSG_ERROR, 0),		\
-		msg)
+		msg);														\
+	INIT_STR_TOK(T_ERR);
 
 /*********************************************************************************/
 /* Constants */
@@ -79,199 +106,246 @@ size_t const Scanner::INVALID_POS = std::numeric_limits<size_t>::max();
 /* Methods */
 /*********************************************************************************/
 /// Analyzes the input stream and returns the next token.
-bool Scanner::lex(Token& token) {
-	FileDescriptor* _tag = tag();
+TokenType Scanner::lex(Token& token) {
 
-	mBegin = mCursor;
 
-	char* lastnl = mCursor - _tag->col;
+#ifdef DEBUG
+	handler()->message(
+		MessageHandler::msgflag(MessageHandler::MSG_DEBUG_SCANNER_VERBOSE, 0),
+		"Entering scanner with condition: '%s'", conditionToString(condition())); 	
+#endif
 
-	// setup the location
-	token.loc_init(_tag->name, _tag->line, _tag->col);
 
-	if (!_tag) {
+	static FileDescriptor* _tag = tag();
+	
+	if (!mTag) {
 		token.init(T_EOF,NULL);
-		return false;
+		return T_EOF;
 	}
 
+	ACTION_BEGIN_TOK();
+	mLastnl = mCursor - mTag->col;
+
+
 	/*!re2c
-		re2c:define:YYCTYPE					= "char";
+		re2c:define:YYCTYPE											= "char";
 
-		re2c:define:YYCURSOR				= mCursor;
-		re2c:define:YYMARKER				= mMarker;
-		re2c:define:YYLIMIT					= mLimit;
+		re2c:define:YYCURSOR										= mCursor;
+		re2c:define:YYMARKER										= mMarker;
+		re2c:define:YYLIMIT											= mLimit;
+	
+		re2c:define:YYFILL											= fill;
+	
+		re2c:define:YYSETCONDITION									= condition;
+		re2c:define:YYGETCONDITION									= condition;
 
-		re2c:define:YYFILL					= fill;
-
-		re2c:define:YYSETCONDITION			= condition;
-		re2c:define:YYGETCONDITION			= condition;
-
-		re2c:indent:top						= 3;
-		re2c:yyfill:enable					= 1;
-
-
-		NL									= [\n];
-		WHITESPACE							= [ \f\r\t\v];
-		INTEGER								= [0-9]+;
-		IDENTIFIER							= [A-Za-z_][a-zA-Z0-9_]+;
-
-		<!*>														{ ACTION_MATCH(); }
-
-		<CODE> WHITESPACE+											{ INIT_STR_TOK(T_WHITESPACE); }
-
-		<CODE> NL													{ ACTION_NEWLINE(); }
-		<STRING_S, STRING_D> NL										{ ACTION_NEWLINE(); }
-		<COMMENT> NL							=> CODE				{ INIT_STR_TOK(T_COMMENT); ACTION_NEWLINE(); return T_COMMENT; }
-		<BL_COMMENT> NL												{ INIT_STR_TOK(T_COMMENT); ACTION_NEWLINE(); return T_COMMENT; }
-		<ASP> NL													{ INIT_STR_TOK(T_ASP);	   ACTION_NEWLINE(); return T_ASP; }
-		<LUA> NL													{ INIT_STR_TOK(T_LUA);	   ACTION_NEWLINE(); return T_LUA; }
-
-		<CODE> [/][*]							=> BL_COMMENT		{ ACTION_BEGIN_TOK(); }
-		<CODE> [%]								=> COMMENT			{ ACTION_BEGIN_TOK(); }
-		<CODE> ":-" WHITESPACE* "begin_asp."	=> ASP				{ INIT_STR_TOK_STR(T_ASP, "% ~ begin ASP block ~"); return T_ASP; }
-		<CODE> ":-" WHITESPACE* "begin_lua."	=> LUA				{ INIT_STR_TOK_STR(T_LUA, "% ~ begin LUA block ~"); return T_LUA; }
-		<CODE> ["]								=> STRING_D			{ ACTION_BEGIN_TOK(); }
-		<CODE> [']								=> STRING_S			{ ACTION_BEGIN_TOK(); }
-
-		<BL_COMMENT> [*][/]						=> CODE				{ INIT_STR_TOK_OFFSET(T_COMMENT,0,2); return T_COMMENT; }
-		<ASP> ":-" WHITESPACE* "end_asp."		=> CODE				{ INIT_STR_TOK_STR(T_ASP, "% ~ end of ASP block ~\n"); return T_ASP; }
-		<LUA> ":-" WHITESPACE* "end_lua."		=> CODE				{ INIT_STR_TOK_STR(T_LUA, "% ~ end of LUA block ~\n"); return T_LUA; }
-		<STRING_S> [\\][']											{ }
-		<STRING_S> [']							=> CODE				{ INIT_STR_TOK_OFFSET(T_STRING,0,1); }
-		<STRING_D> [\\]["]											{ }
-		<STRING_D> ["]							=> CODE				{ INIT_STR_TOK_OFFSET(T_STRING,0,1); }
-
-		<CODE> "constants"											{ INIT_VOID_TOK(T_CONSTANTS);			return T_CONSTANTS; }
-		<CODE> "include"											{ INIT_VOID_TOK(T_INCLUDE);				return T_INCLUDE; }
-		<CODE> "macros"												{ INIT_VOID_TOK(T_MACROS);				return T_MACROS; }
-		<CODE> "objects"											{ INIT_VOID_TOK(T_OBJECTS);				return T_OBJECTS; }
-		<CODE> "query"												{ INIT_VOID_TOK(T_QUERY);				return T_QUERY; }
-		<CODE> "show"												{ INIT_VOID_TOK(T_SHOW);				return T_SHOW; }
-		<CODE> "sorts"												{ INIT_VOID_TOK(T_SORTS);				return T_SORTS; }
-		<CODE> "variables"											{ INIT_VOID_TOK(T_VARIABLES);			return T_VARIABLES; }
-
-		<CODE> "abAction"											{ INIT_VOID_TOK(T_ABACTION);			return T_ABACTION; }
-		<CODE> "action"												{ INIT_VOID_TOK(T_ACTION);				return T_ACTION; }
-		<CODE> "additiveAction"										{ INIT_VOID_TOK(T_ADDITIVEACTION);		return T_ADDITIVEACTION; }
-		<CODE> "additiveFluent"										{ INIT_VOID_TOK(T_ADDITIVEFLUENT);		return T_ADDITIVEFLUENT; }
-		<CODE> "after"												{ INIT_VOID_TOK(T_AFTER);				return T_AFTER; }
-		<CODE> "always"												{ INIT_VOID_TOK(T_ALWAYS);				return T_ALWAYS; }
-		<CODE> "attribute"											{ INIT_VOID_TOK(T_ATTRIBUTE);			return T_ATTRIBUTE; }
-		<CODE> "assuming"											{ INIT_VOID_TOK(T_ASSUMING);			return T_ASSUMING; }
-		<CODE> "by"													{ INIT_VOID_TOK(T_BY);					return T_BY; }
-		<CODE> "caused"												{ INIT_VOID_TOK(T_CAUSED);				return T_CAUSED; }
-		<CODE> "causes"												{ INIT_VOID_TOK(T_CAUSES);				return T_CAUSES; }
-		<CODE> "impossible"											{ INIT_VOID_TOK(T_IMPOSSIBLE);			return T_IMPOSSIBLE; }
-		<CODE> "constraint"											{ INIT_VOID_TOK(T_CONSTRAINT);			return T_CONSTRAINT; }
-		<CODE> "decrements"											{ INIT_VOID_TOK(T_DECREMENTS);			return T_DECREMENTS; }
-		<CODE> "default"											{ INIT_VOID_TOK(T_DEFAULT);				return T_DEFAULT; }
-		<CODE> "dynamicAbnormality"									{ INIT_VOID_TOK(T_DYNAMICAB);			return T_DYNAMICAB; }
-		<CODE> "exogenousAction"									{ INIT_VOID_TOK(T_EXOGENOUSACTION);		return T_EXOGENOUSACTION; }
-		<CODE> "exogenous"											{ INIT_VOID_TOK(T_EXOGENOUS);			return T_EXOGENOUS; }
-		<CODE> "if"													{ INIT_VOID_TOK(T_IF);					return T_IF; }
-		<CODE> "increments"											{ INIT_VOID_TOK(T_INCREMENTS);			return T_INCREMENTS; }
-		<CODE> "inertial"											{ INIT_VOID_TOK(T_INERTIAL);			return T_INERTIAL; }
-		<CODE> "inertialFluent"										{ INIT_VOID_TOK(T_INERTIALFLUENT);		return T_INERTIALFLUENT; }
-		<CODE> "label"												{ INIT_VOID_TOK(T_LABEL);				return T_LABEL; }
-		<CODE> "may cause"											{ INIT_VOID_TOK(T_MAY_CAUSE);			return T_MAY_CAUSE; }
-		<CODE> "maxAdditive"										{ INIT_VOID_TOK(T_MAXADDITIVE);			return T_MAXADDITIVE; }
-		<CODE> "maxstep"											{ INIT_VOID_TOK(T_MAXSTEP);				return T_MAXSTEP; }
-		<CODE> "never"												{ INIT_VOID_TOK(T_NEVER);				return T_NEVER; }
-		<CODE> "noconcurrency"										{ INIT_VOID_TOK(T_NOCONCURRENCY);		return T_NOCONCURRENCY; }
-		<CODE> "strong_noconcurrency" 								{ INIT_VOID_TOK(T_STRONG_NOCONCURRENCY);return T_STRONG_NOCONCURRENCY; }
-		<CODE> "nonexecutable"										{ INIT_VOID_TOK(T_NONEXECUTABLE);		return T_NONEXECUTABLE; }
-		<CODE> "of"													{ INIT_VOID_TOK(T_OF);					return T_OF; }
-		<CODE> "possibly caused"									{ INIT_VOID_TOK(T_POSSIBLY_CAUSED);		return T_POSSIBLY_CAUSED; }
-		<CODE> "rigid"												{ INIT_VOID_TOK(T_RIGID);				return T_RIGID; }
-		<CODE> "sdFluent"											{ INIT_VOID_TOK(T_SDFLUENT);			return T_SDFLUENT; }
-		<CODE> "simpleFluent"										{ INIT_VOID_TOK(T_SIMPLEFLUENT);		return T_SIMPLEFLUENT; }
-		<CODE> "staticAbnormality"									{ INIT_VOID_TOK(T_STATICAB);			return T_STATICAB; }
-		<CODE> "unless"												{ INIT_VOID_TOK(T_UNLESS);				return T_UNLESS; }
-		<CODE> "when"												{ INIT_VOID_TOK(T_WHEN);				return T_WHEN; }
-		<CODE> "following"											{ INIT_VOID_TOK(T_FOLLOWING);			return T_FOLLOWING; }
-		<CODE> "where"												{ INIT_VOID_TOK(T_WHERE);				return T_WHERE; }
-
-		<CODE> ":-"													{ INIT_VOID_TOK(T_COLON_DASH);			return T_COLON_DASH; }
-		<CODE> "::"													{ INIT_VOID_TOK(T_DBL_COLON);			return T_DBL_COLON; }
-		<CODE> ":"													{ INIT_VOID_TOK(T_COLON);				return T_COLON; }
-
-		<CODE> "->>"												{ INIT_VOID_TOK(T_IMPL);				return T_IMPL; }
-		<CODE> "->"													{ INIT_VOID_TOK(T_ARROW_RDASH);			return T_ARROW_RDASH; }
-		<CODE> "-"													{ INIT_VOID_TOK(T_DASH);				return T_DASH; }
-
-		<CODE> "<->"												{ INIT_VOID_TOK(T_EQUIV);				return T_EQUIV; }
-		<CODE> "<-"													{ INIT_VOID_TOK(T_ARROW_LDASH);			return T_ARROW_LDASH; }
-		<CODE> "<="													{ INIT_VOID_TOK(T_ARROW_LEQ);			return T_ARROW_LEQ; }
-		<CODE> "<>"													{ INIT_VOID_TOK(T_NOT_EQ);				return T_NOT_EQ; }
-		<CODE> "<"													{ INIT_VOID_TOK(T_LTHAN);				return T_LTHAN; }
-
-		<CODE> ">="													{ INIT_VOID_TOK(T_GTHAN_EQ);			return T_GTHAN_EQ; }
-		<CODE> ">>"													{ INIT_VOID_TOK(T_DBL_GTHAN);			return T_DBL_GTHAN; }
-		<CODE> ">"													{ INIT_VOID_TOK(T_GTHAN);				return T_GTHAN; }
-
-		<CODE> "@<"													{ INIT_VOID_TOK(T_LTHAN);				return T_LTHAN; }
-		<CODE> "@>="												{ INIT_VOID_TOK(T_GTHAN_EQ);			return T_GTHAN_EQ; }
-		<CODE> "@>"													{ INIT_VOID_TOK(T_GTHAN);				return T_GTHAN; }
-		<CODE> "@=<"												{ INIT_VOID_TOK(T_EQ_LTHAN);			return T_EQ_LTHAN; }
-		<CODE> "@"													{ INIT_VOID_TOK(T_AT);					return T_AT; }
-
-		<CODE> "=>"													{ INIT_VOID_TOK(T_ARROW_REQ);			return T_ARROW_REQ; }
-		<CODE> "=<"													{ INIT_VOID_TOK(T_EQ_LTHAN);			return T_EQ_LTHAN; }
-		<CODE> "=="													{ INIT_VOID_TOK(T_DBL_EQ);				return T_DBL_EQ; }
-		<CODE> "="													{ INIT_VOID_TOK(T_EQ);					return T_EQ; }
-
-		<CODE> "&&"													{ INIT_VOID_TOK(T_AMP);					return T_AMP; }
-		<CODE> "&"													{ INIT_VOID_TOK(T_AMP);					return T_AMP; }
-		<CODE> "++"													{ INIT_VOID_TOK(T_DBL_PLUS);			return T_DBL_PLUS; }
-		<CODE> "+"													{ INIT_VOID_TOK(T_PLUS);				return T_PLUS; }
-
-		<CODE> ".."													{ INIT_VOID_TOK(T_DBL_PERIOD);			return T_DBL_PERIOD; }
-		<CODE> "."													{ INIT_VOID_TOK(T_PERIOD);				return T_PERIOD; }
-
-		<CODE> "\\="												{ INIT_VOID_TOK(T_NOT_EQ);				return T_NOT_EQ; }
-		<CODE> "\\/"												{ INIT_VOID_TOK(T_BIG_DISJ);			return T_BIG_DISJ; }
-
-		<CODE> "//"													{ INIT_VOID_TOK(T_INT_DIV);				return T_INT_DIV; }
-		<CODE> "/\\"												{ INIT_VOID_TOK(T_BIG_CONJ);			return T_BIG_CONJ; }
-
-		<CODE> ","													{ INIT_VOID_TOK(T_COMMA);				return T_COMMA; }
-		<CODE> ";"													{ INIT_VOID_TOK(T_SEMICOLON);			return T_SEMICOLON; }
-		<CODE> "|"													{ INIT_VOID_TOK(T_PIPE);				return T_PIPE; }
-		<CODE> "#"													{ INIT_VOID_TOK(T_POUND);				return T_POUND; }
-		<CODE> "*"													{ INIT_VOID_TOK(T_STAR);				return T_STAR; }
-
-		<CODE> "["													{ INIT_VOID_TOK(T_BRACKET_L);			return T_BRACKET_L; }
-		<CODE> "]"													{ INIT_VOID_TOK(T_BRACKET_R);			return T_BRACKET_R; }
-
-		<CODE> "("													{ INIT_VOID_TOK(T_PAREN_L);				return T_PAREN_L; }
-		<CODE> ")"													{ INIT_VOID_TOK(T_PAREN_R);				return T_PAREN_R; }
-
-		<CODE> "abs"												{ INIT_VOID_TOK(T_ABS);					return T_ABS; }
-		<CODE> "eq"													{ INIT_VOID_TOK(T_EQ);					return T_EQ; }
-		<CODE> "false"												{ INIT_VOID_TOK(T_FALSE);				return T_FALSE; }
-		<CODE> "mod"												{ INIT_VOID_TOK(T_MOD);					return T_MOD; }
-		<CODE> "neq"												{ INIT_VOID_TOK(T_NOT_EQ);				return T_NOT_EQ; }
-		<CODE> "none"												{ INIT_VOID_TOK(T_NONE);				return T_NONE; }
-		<CODE> "not"												{ INIT_VOID_TOK(T_NOT);					return T_NOT; }
-		<CODE> "true"												{ INIT_VOID_TOK(T_TRUE);				return T_TRUE; }
-
-		<CODE> INTEGER												{ INIT_STR_TOK(T_INTEGER);				return T_INTEGER; }
-		<CODE> IDENTIFIER											{ INIT_STR_TOK(T_IDENTIFIER);			return T_IDENTIFIER; }
+		re2c:indent:top												= 3;
+		re2c:yyfill:enable											= 1;
 
 
-		<STRING_S,STRING_D,COMMENT,BL_COMMENT,ASP,LUA> [\EOF]		{ INIT_VOID_TOK(T_ERR); ERROR("Unexpected end of file");	return T_ERR; }
-		<CODE> [\EOF]												{ INIT_VOID_TOK(T_EOF);					return T_EOF; }
+		NL															= "\n";
+		WHITESPACE													= [ \f\r\t\v];
+		INTEGER														= [0-9]+;
+		SIGNED_INTEGER												= [-]? INTEGER;
+		IDENTIFIER													= [_]? [A-Za-z] [a-zA-Z0-9_]*;
+		DECIMAL														= SIGNED_INTEGER? [.] INTEGER;
 
-		<CODE> .													{ INIT_STR_TOK(T_ERR); ERROR("Unexpected token");			return T_ERR; }
+
+		<!*>														{ 
+		
+																	ACTION_MATCH(); 
+
+																	#ifdef DEBUG
+																	handler()->message(
+																		MessageHandler::msgflag(MessageHandler::MSG_DEBUG_SCANNER_VERBOSE, 0),
+																		"Looking at char '%c'", yych); 	
+																	#endif
+
+																	}
+
+
+		<CODE> WHITESPACE						=> CODE				{ ACTION_BEGIN_TOK(); 									goto yyc_CODE; }
+
+		<CODE> NL								=> CODE				{ ACTION_NEWLINE(); ACTION_BEGIN_TOK(); 				goto yyc_CODE; }
+		<STRING_S> NL							=> STRING_S			{ ACTION_NEWLINE(); 									goto yyc_STRING_S; }
+		<STRING_D> NL							=> STRING_D			{ ACTION_NEWLINE(); 									goto yyc_STRING_D; }
+		<COMMENT> NL							=> CODE				{ INIT_STR_TOK_OFFSET(T_COMMENT,0,1); ACTION_NEWLINE(); return T_COMMENT; }
+		<BL_COMMENT> NL							=> BL_COMMENT		{ INIT_STR_TOK_OFFSET(T_COMMENT,0,1); ACTION_NEWLINE(); return T_COMMENT; }
+		<ASP> NL								=> ASP				{ INIT_STR_TOK(T_ASP); ACTION_NEWLINE(); 				return T_ASP; }
+		<LUA> NL								=> LUA				{ INIT_STR_TOK(T_LUA); ACTION_NEWLINE(); 				return T_LUA; }
+
+		<CODE> [/][*]							=> BL_COMMENT		{ ACTION_BEGIN_TOK(); 									goto yyc_BL_COMMENT; }
+		<CODE> "%"								=> COMMENT			{ ACTION_BEGIN_TOK(); 									goto yyc_COMMENT;}
+		<CODE> '#begin_asp.'					=> ASP				{ INIT_STR_TOK_STR(T_ASP, "% ~ begin ASP block ~");		return T_ASP; }
+		<CODE> '#begin_lua.'					=> LUA				{ INIT_STR_TOK_STR(T_LUA, "% ~ begin LUA block ~");	 	return T_LUA; }
+		<CODE> ["]								=> STRING_D			{ ACTION_BEGIN_TOK_OFFSET(-1); 							goto yyc_STRING_D; }
+		<CODE> [']								=> STRING_S			{ ACTION_BEGIN_TOK_OFFSET(-1); 							goto yyc_STRING_S; }
+
+		<BL_COMMENT> [*][/]						=> CODE				{ INIT_STR_TOK_OFFSET(T_COMMENT,0,2); 					return T_COMMENT; }
+		<ASP> '#end_asp.'						=> CODE				{ INIT_STR_TOK_STR(T_ASP, "% ~ end ASP block ~\n"); 	return T_ASP; }
+		<LUA> '#end_lua.'						=> CODE				{ INIT_STR_TOK_STR(T_LUA, "% ~ end LUA block ~\n"); 	return T_LUA; }
+		<STRING_S> [\\][']											{ 														goto yyc_STRING_S; }
+		<STRING_S> [']							=> CODE				{ INIT_STR_TOK_OFFSET(T_STRING,0,0); 					return T_STRING; }
+		<STRING_D> [\\]["]											{ 														goto yyc_STRING_D; }
+		<STRING_D> ["]							=> CODE				{ INIT_STR_TOK_OFFSET(T_STRING,0,0); 					return T_STRING; }
+
+		<CODE> "constants"											{ INIT_VOID_TOK(T_CONSTANTS);							return T_CONSTANTS; }
+		<CODE> "include"											{ INIT_VOID_TOK(T_INCLUDE);								return T_INCLUDE; }
+		<CODE> "macros"												{ INIT_VOID_TOK(T_MACROS);								return T_MACROS; }
+		<CODE> "objects"											{ INIT_VOID_TOK(T_OBJECTS);								return T_OBJECTS; }
+		<CODE> "query"												{ INIT_VOID_TOK(T_QUERY);								return T_QUERY; }
+		<CODE> "show"												{ INIT_VOID_TOK(T_SHOW);								return T_SHOW; }
+		<CODE> "sorts"												{ INIT_VOID_TOK(T_SORTS);								return T_SORTS; }
+		<CODE> "variables"											{ INIT_VOID_TOK(T_VARIABLES);							return T_VARIABLES; }
+
+		<CODE> "abAction"											{ INIT_VOID_TOK(T_ABACTION);							return T_ABACTION; }
+		<CODE> "action"												{ INIT_VOID_TOK(T_ACTION);								return T_ACTION; }
+		<CODE> "additiveAction"										{ INIT_VOID_TOK(T_ADDITIVEACTION);						return T_ADDITIVEACTION; }
+		<CODE> "additiveFluent"										{ INIT_VOID_TOK(T_ADDITIVEFLUENT);						return T_ADDITIVEFLUENT; }
+		<CODE> "after"												{ INIT_VOID_TOK(T_AFTER);								return T_AFTER; }
+		<CODE> "always"												{ INIT_VOID_TOK(T_ALWAYS);								return T_ALWAYS; }
+		<CODE> "attribute"											{ INIT_VOID_TOK(T_ATTRIBUTE);							return T_ATTRIBUTE; }
+		<CODE> "assuming"											{ INIT_VOID_TOK(T_ASSUMING);							return T_ASSUMING; }
+		<CODE> "by"													{ INIT_VOID_TOK(T_BY);									return T_BY; }
+		<CODE> "caused"												{ INIT_VOID_TOK(T_CAUSED);								return T_CAUSED; }
+		<CODE> "causes"												{ INIT_VOID_TOK(T_CAUSES);								return T_CAUSES; }
+		<CODE> "impossible"											{ INIT_VOID_TOK(T_IMPOSSIBLE);							return T_IMPOSSIBLE; }
+		<CODE> "constraint"											{ INIT_VOID_TOK(T_CONSTRAINT);							return T_CONSTRAINT; }
+		<CODE> "decrements"											{ INIT_VOID_TOK(T_DECREMENTS);							return T_DECREMENTS; }
+		<CODE> "default"											{ INIT_VOID_TOK(T_DEFAULT);								return T_DEFAULT; }
+		<CODE> "dynamicAbnormality"									{ INIT_VOID_TOK(T_DYNAMICAB);							return T_DYNAMICAB; }
+		<CODE> "exogenousAction"									{ INIT_VOID_TOK(T_EXOGENOUSACTION);						return T_EXOGENOUSACTION; }
+		<CODE> "exogenous"											{ INIT_VOID_TOK(T_EXOGENOUS);							return T_EXOGENOUS; }
+		<CODE> "if"													{ INIT_VOID_TOK(T_IF);									return T_IF; }
+		<CODE> "increments"											{ INIT_VOID_TOK(T_INCREMENTS);							return T_INCREMENTS; }
+		<CODE> "inertial"											{ INIT_VOID_TOK(T_INERTIAL);							return T_INERTIAL; }
+		<CODE> "inertialFluent"										{ INIT_VOID_TOK(T_INERTIALFLUENT);						return T_INERTIALFLUENT; }
+		<CODE> "label"												{ INIT_VOID_TOK(T_LABEL);								return T_LABEL; }
+		<CODE> "may cause"											{ INIT_VOID_TOK(T_MAY_CAUSE);							return T_MAY_CAUSE; }
+		<CODE> "maxAdditive"										{ INIT_VOID_TOK(T_MAXADDITIVE);							return T_MAXADDITIVE; }
+		<CODE> "maxstep"											{ INIT_VOID_TOK(T_MAXSTEP);								return T_MAXSTEP; }
+		<CODE> "never"												{ INIT_VOID_TOK(T_NEVER);								return T_NEVER; }
+		<CODE> "noconcurrency"										{ INIT_VOID_TOK(T_NOCONCURRENCY);						return T_NOCONCURRENCY; }
+		<CODE> "strong_noconcurrency" 								{ INIT_VOID_TOK(T_STRONG_NOCONCURRENCY);				return T_STRONG_NOCONCURRENCY; }
+		<CODE> "nonexecutable"										{ INIT_VOID_TOK(T_NONEXECUTABLE);						return T_NONEXECUTABLE; }
+		<CODE> "of"													{ INIT_VOID_TOK(T_OF);									return T_OF; }
+		<CODE> "possibly caused"									{ INIT_VOID_TOK(T_POSSIBLY_CAUSED);						return T_POSSIBLY_CAUSED; }
+		<CODE> "rigid"												{ INIT_VOID_TOK(T_RIGID);								return T_RIGID; }
+		<CODE> "sdFluent"											{ INIT_VOID_TOK(T_SDFLUENT);							return T_SDFLUENT; }
+		<CODE> "simpleFluent"										{ INIT_VOID_TOK(T_SIMPLEFLUENT);						return T_SIMPLEFLUENT; }
+		<CODE> "staticAbnormality"									{ INIT_VOID_TOK(T_STATICAB);							return T_STATICAB; }
+		<CODE> "unless"												{ INIT_VOID_TOK(T_UNLESS);								return T_UNLESS; }
+		<CODE> "when"												{ INIT_VOID_TOK(T_WHEN);								return T_WHEN; }
+		<CODE> "following"											{ INIT_VOID_TOK(T_FOLLOWING);							return T_FOLLOWING; }
+		<CODE> "where"												{ INIT_VOID_TOK(T_WHERE);								return T_WHERE; }
+
+		<CODE> ":-"													{ INIT_VOID_TOK(T_COLON_DASH);							return T_COLON_DASH; }
+		<CODE> "::"													{ INIT_VOID_TOK(T_DBL_COLON);							return T_DBL_COLON; }
+		<CODE> ":"													{ INIT_VOID_TOK(T_COLON);								return T_COLON; }
+
+		<CODE> "->>"												{ INIT_VOID_TOK(T_IMPL);								return T_IMPL; }
+		<CODE> "->"													{ INIT_VOID_TOK(T_ARROW_RDASH);							return T_ARROW_RDASH; }
+		<CODE> "-"													{ INIT_VOID_TOK(T_DASH);								return T_DASH; }
+
+		<CODE> "<->"												{ INIT_VOID_TOK(T_EQUIV);								return T_EQUIV; }
+		<CODE> "<-"													{ INIT_VOID_TOK(T_ARROW_LDASH);							return T_ARROW_LDASH; }
+		<CODE> "<="													{ INIT_VOID_TOK(T_ARROW_LEQ);							return T_ARROW_LEQ; }
+		<CODE> "<>"													{ INIT_VOID_TOK(T_NOT_EQ);								return T_NOT_EQ; }
+		<CODE> "<"													{ INIT_VOID_TOK(T_LTHAN);								return T_LTHAN; }
+
+		<CODE> ">="													{ INIT_VOID_TOK(T_GTHAN_EQ);							return T_GTHAN_EQ; }
+		<CODE> ">>"													{ INIT_VOID_TOK(T_DBL_GTHAN);							return T_DBL_GTHAN; }
+		<CODE> ">"													{ INIT_VOID_TOK(T_GTHAN);								return T_GTHAN; }
+
+		<CODE> "@<"													{ INIT_VOID_TOK(T_LTHAN);								return T_LTHAN; }
+		<CODE> "@>="												{ INIT_VOID_TOK(T_GTHAN_EQ);							return T_GTHAN_EQ; }
+		<CODE> "@>"													{ INIT_VOID_TOK(T_GTHAN);								return T_GTHAN; }
+		<CODE> "@=<"												{ INIT_VOID_TOK(T_EQ_LTHAN);							return T_EQ_LTHAN; }
+		<CODE> "@"													{ INIT_VOID_TOK(T_AT);									return T_AT; }
+
+		<CODE> "=>"													{ INIT_VOID_TOK(T_ARROW_REQ);							return T_ARROW_REQ; }
+		<CODE> "=<"													{ INIT_VOID_TOK(T_EQ_LTHAN);							return T_EQ_LTHAN; }
+		<CODE> "=="													{ INIT_VOID_TOK(T_DBL_EQ);								return T_DBL_EQ; }
+		<CODE> "="													{ INIT_VOID_TOK(T_EQ);									return T_EQ; }
+
+		<CODE> "&&"													{ INIT_VOID_TOK(T_AMP);									return T_AMP; }
+		<CODE> "&"													{ INIT_VOID_TOK(T_AMP);									return T_AMP; }
+		<CODE> "++"													{ INIT_VOID_TOK(T_DBL_PLUS);							return T_DBL_PLUS; }
+		<CODE> "+"													{ INIT_VOID_TOK(T_PLUS);								return T_PLUS; }
+
+		<CODE> ".."													{ INIT_VOID_TOK(T_DBL_PERIOD);							return T_DBL_PERIOD; }
+		<CODE> "."													{ INIT_VOID_TOK(T_PERIOD);								return T_PERIOD; }
+
+		<CODE> "\\="												{ INIT_VOID_TOK(T_NOT_EQ);								return T_NOT_EQ; }
+		<CODE> "\\/"												{ INIT_VOID_TOK(T_BIG_DISJ);							return T_BIG_DISJ; }
+
+		<CODE> "//"													{ INIT_VOID_TOK(T_INT_DIV);								return T_INT_DIV; }
+		<CODE> "/\\"												{ INIT_VOID_TOK(T_BIG_CONJ);							return T_BIG_CONJ; }
+
+		<CODE> ","													{ INIT_VOID_TOK(T_COMMA);								return T_COMMA; }
+		<CODE> ";"													{ INIT_VOID_TOK(T_SEMICOLON);							return T_SEMICOLON; }
+		<CODE> "|"													{ INIT_VOID_TOK(T_PIPE);								return T_PIPE; }
+		<CODE> "#"													{ INIT_VOID_TOK(T_POUND);								return T_POUND; }
+		<CODE> "*"													{ INIT_VOID_TOK(T_STAR);								return T_STAR; }
+
+		<CODE> "["													{ INIT_VOID_TOK(T_BRACKET_L);							return T_BRACKET_L; }
+		<CODE> "]"													{ INIT_VOID_TOK(T_BRACKET_R);							return T_BRACKET_R; }
+
+		<CODE> "("													{ INIT_VOID_TOK(T_PAREN_L);								return T_PAREN_L; }
+		<CODE> ")"													{ INIT_VOID_TOK(T_PAREN_R);								return T_PAREN_R; }
+
+		<CODE> "abs"												{ INIT_VOID_TOK(T_ABS);									return T_ABS; }
+		<CODE> "eq"													{ INIT_VOID_TOK(T_EQ);									return T_EQ; }
+		<CODE> "false"												{ INIT_VOID_TOK(T_FALSE);								return T_FALSE; }
+		<CODE> "mod"												{ INIT_VOID_TOK(T_MOD);									return T_MOD; }
+		<CODE> "neq"												{ INIT_VOID_TOK(T_NOT_EQ);								return T_NOT_EQ; }
+		<CODE> "none"												{ INIT_VOID_TOK(T_NONE);								return T_NONE; }
+		<CODE> "not"												{ INIT_VOID_TOK(T_NOT);									return T_NOT; }
+		<CODE> "true"												{ INIT_VOID_TOK(T_TRUE);								return T_TRUE; }
+
+		<CODE> '#debug_insert_file.'								{ INIT_VOID_TOK(T_DEBUG_INSERT);						return T_DEBUG_INSERT; }
+		<CODE> '#debug_append_file.'								{ INIT_VOID_TOK(T_DEBUG_APPEND);						return T_DEBUG_APPEND; }
+		<CODE> '#debug_inject_string.'								{ INIT_VOID_TOK(T_DEBUG_INJECT);						return T_DEBUG_INJECT; }
+
+		<CODE> DECIMAL												{ INIT_STR_TOK(T_DECIMAL);								return T_DECIMAL; }
+		<CODE> SIGNED_INTEGER										{ INIT_STR_TOK(T_INTEGER);								return T_INTEGER; }
+		<CODE> IDENTIFIER											{ INIT_STR_TOK(T_IDENTIFIER);							return T_IDENTIFIER; }
+
+
+
+		<CODE> '\000'												{ ACTION_EOF(); 										goto yyc_CODE; }
+		<COMMENT> '\000'								=> CODE		{ INIT_STR_TOK_OFFSET(T_COMMENT, 0, 1); 				return T_COMMENT; }
+		<STRING_S,STRING_D,BL_COMMENT,ASP,LUA> '\000'	=> CODE		{ ERROR("Unexpected end of file.");				 		return T_ERR; }
+
+		<ASP> .														{ 														goto yyc_ASP; }
+		<LUA> .														{ 														goto yyc_LUA; }
+		<STRING_S> .												{ 														goto yyc_STRING_S; }
+		<STRING_D> .												{ 														goto yyc_STRING_D; }
+		<COMMENT> .													{ 														goto yyc_COMMENT; }
+		<BL_COMMENT> .												{ 														goto yyc_BL_COMMENT; }
+
+
+		<CODE> .													{ ERROR("Unexpected token");							return T_ERR; }
 	*/
 
-	return true;
 }
 
 // Appends a file to the end of the input stream.
 bool Scanner::appendFile(std::string const& file, std::string const& name) {
+
+#ifdef DEBUG
+	handler()->message(
+		MessageHandler::msgflag(MessageHandler::MSG_DEBUG_SCANNER, 0),
+		"Appending file '%s' to the bottom of the read stack.", (tag()) ? tag()->name->c_str() : "<no file>"); 	
+#endif
+
+
 	mNames.push_back(name);
-	return mInput->append(file, &(mNames.back())); 
+	if (mInput->append(file, &(mNames.back()), NULL)) {
+		mTag = tag();
+		return true;
+	} else return false;
+	 
 }
 
 // Appends a file to the end of the input stream.
@@ -281,30 +355,58 @@ bool Scanner::insertFile(std::string const& file, std::string const& name) {
 	// however we've buffered a chunk of the current file for 
 	// RE2C to work with.
 
+	if (mTag) {
+		UPDATE_COL();	
+	}
+
+
+#ifdef DEBUG
+	handler()->message(
+		MessageHandler::msgflag(MessageHandler::MSG_DEBUG_SCANNER, 0),
+		"Pushing '%.*s' back onto the read buffer.", (size_t)(mLimit - mCursor), mCursor); 	
+#endif 	
+
 	// We need to put back what we have first.
-	mInput->putback(mBegin, (std::streamsize)(mLimit - mBegin));
+	mInput->putback(mCursor, (std::streamsize)(mLimit - mCursor));
 	mLimit = mBegin = mCursor = mBuffer;
+
+
+#ifdef DEBUG
+	handler()->message(
+		MessageHandler::msgflag(MessageHandler::MSG_DEBUG_SCANNER, 0),
+		"Inserting file '%s' onto top of read stack.", (tag()) ? tag()->name->c_str() : "<no file>"); 	
+#endif 	
 
 	// Now we can continue.
 	mNames.push_back(name);
-	return mInput->insert(file, &(mNames.back()));
+	if (mInput->insert(file, &(mNames.back()), NULL)) {
+		mTag = tag();
+		return true;
+	} else return false;
 }
 	
 // Injects a string at the input stream's current location to be read next.
-bool Scanner::inject(std::string const& str, bool noloc) {
-	// Sanity check: We're working on a file.
-	FileDescriptor* _tag = tag();
-	if (!_tag) return false;
+bool Scanner::inject(std::string const& str, Location const& loc) {
+	if (mTag) {
+		UPDATE_COL();	
+	}
 
-	// update noloc
-	if (noloc) _tag->noloc += str.size();
+#ifdef DEBUG
+	handler()->message(
+		MessageHandler::msgflag(MessageHandler::MSG_DEBUG_SCANNER, 0),
+		"Injecting text '%s' into file stream.", str.c_str()); 	
+#endif
+
 
 	// We need to put back what we have first.
-	mInput->putback(mBegin, (std::streamsize)(mLimit - mBegin));
+	mInput->putback(mCursor, (std::streamsize)(mLimit - mCursor));
 	mLimit = mBegin = mCursor = mBuffer;
 
-	// Now we can continue.
-	mInput->putback(str.c_str(), str.size());
+	// Now we can continue
+	if (mInput->inject(str.c_str(), str.size(), true, NULL, new Location(loc))) {
+		mTag = tag();
+		return true;
+	} else return false;
 }
 
 
@@ -313,17 +415,21 @@ void Scanner::fill(size_t len) {
 	size_t got = 0;
 
 	// readjust the beginning of the buffer when necessary...
-	if (mCursor + len >= mBufEnd - 1) {
+	if (mLimit + len >= mBufEnd) {
 		shift();
 	}
 
-	FileDescriptor* _tag = tag();
 
-	if (!_tag) {
+	//mTag = tag();
+
+	if (!mTag) {
 		// no available files, pad the buffer with EOF
-		memset(mLimit, EOF, len);
-		mLimit += len;
+		*mLimit++ = '\0';
 		return;
+	} else if (mInput->eof()) {
+		// Make sure we're working on ONE file at a time.
+		if(mBegin == mLimit) advance();
+		else return;
 	}
 	
 	// fill the buffer
@@ -336,7 +442,7 @@ void Scanner::fill(size_t len) {
 		// error checking and handling.
 		// Try recovering once to avoid an infinite loop.
 		if (mInput->eof()) {
-			advance();
+			mLimit[got++] = '\0';
 		} else if ((mInput.bad() || mInput->error()) && (!err || mInput.gcount())) {
 			err = true;
 			mInput->reset();
@@ -347,17 +453,24 @@ void Scanner::fill(size_t len) {
 	
 	} while (len > got && mInput->good() && mInput.good());
 
+
 	// adjust the limit
 	mLimit += got;
+
+
+
+#ifdef DEBUG
+	handler()->message(
+		MessageHandler::msgflag(MessageHandler::MSG_DEBUG_SCANNER_VERBOSE, 0),
+		"Filled Scanner buffer. Buffer state: '%.*s'.", (size_t)(mLimit-mBegin), mBegin); 	
+#endif
+
 
 	if (mInput->error() || mInput.bad()) {
 		// Tell them we're having issues.
 		handler()->message(
 			MessageHandler::msgflag(MessageHandler::MSG_ERROR, 0), 
 			"An error occurred while reading '%s'.", tag()->name->c_str());
-
-		// skip this file.
-		advance();
 	}
 }
 
@@ -366,20 +479,49 @@ void Scanner::advance() {
 	mInput->nextFile();
 	mInput.clear();
 	mInput->reset();
+	
+#ifdef DEBUG
+	handler()->message(
+		MessageHandler::msgflag(MessageHandler::MSG_DEBUG_SCANNER, 0),
+		"Advanced scanner to file '%s'.", (tag()) ? tag()->name->c_str() : "<no file>"); 	
+#endif
 
-	// push a blank token onto the input to ensure that tokens don't cross files.
-	if (mLimit == mBufEnd) shift();
-	*mLimit = ' ';
-	mLimit++;
+	// reset buffers...
+	mCursor = mLimit = mBegin = mBuffer;
 
+	*mLimit++ = '\0';
+	
+	// make sure to update relevant information.
+	if ((mTag = tag()))
+		mLastnl = mCursor - mTag->col + 1;
+	else
+		mLastnl = mCursor - 1;
 }
+
+/// Gets a string representation of the condition.
+char const* Scanner::conditionToString(YYCONDTYPE cond) {
+	switch (cond) {
+	case yycCODE:		return "CODE";
+	case yycSTRING_D: 	return "STRING_D";
+	case yycSTRING_S:	return "STRING_S";
+	case yycASP:		return "ASP";
+	case yycLUA:		return "LUA";
+	case yycCOMMENT:	return "COMMENT";
+	case yycBL_COMMENT: return "BL_COMMENT";
+	default:			return "<UNKNOWN>";
+	}
+}
+
+
 
 // Shifts re2c's position back to the beginning.
 void Scanner::shift() {
+	size_t delta = mBegin - mBuffer;
 	memmove(mBuffer, mBegin, (size_t)(mLimit - mBegin));
-	mLimit -= mBegin - mBuffer;
-	mMarker -= mBegin - mBuffer;
-	mCursor -= mBegin - mBuffer;
+	mLimit -= delta;
+	mMarker -= delta;
+	mCursor -= delta;
+	mLastnl -= delta;
 	mBegin = mBuffer;
 }
 

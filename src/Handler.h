@@ -55,6 +55,8 @@ public:
 	/// A list of well-defined message levels.
 	typedef enum {
 		MSG_DEBUG = 0,
+		MSG_DEBUG_SCANNER_VERBOSE = 1,
+		MSG_DEBUG_SCANNER = 2,
 		MSG_VERBOSE = 32,
 		MSG_PRAGMA = 64,
 		MSG_WARN = 128,
